@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "key": "readme",
+  "name": "My README checks",
+  "timeout": 3,
+  "tests": [
+    {
+      "name": "readme-exists",
+      "command": ["{python}", "{tests_dir}/check_readme.py", "{directory}"]
+    }
+  ]
+}

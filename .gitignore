@@ -1,2 +1,4 @@
 build/
 ftorture.log
+__pycache__/
+*.py[cod]
