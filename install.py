@@ -116,7 +116,7 @@ def install(root: Path, home: Path) -> Path:
     if target.is_symlink():
         previous = Path(os.readlink(target))
         if not previous.is_absolute():
-            previous = target.parent / previous
+            previous = Path(os.path.normpath(target.parent / previous))
         if previous.parent != applications or not managed(previous):
             raise RuntimeError(f"Refusing to replace an existing command: {target}")
     elif target.exists() and not managed(target):
@@ -154,7 +154,7 @@ def uninstall(home: Path) -> None:
         previous = Path(os.readlink(target))
         if not previous.is_absolute():
             previous = target.parent / previous
-        previous = previous.absolute()
+        previous = Path(os.path.normpath(previous.absolute()))
         if previous.parent != home / ".local/applications" or not managed(previous):
             raise RuntimeError(f"Refusing to delete an unrelated command: {target}")
     elif target.exists():

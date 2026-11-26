@@ -84,8 +84,11 @@ static t_blk	*lookup(uintptr_t p, int create)
 
 void	zm_reset(void)
 {
-	memset(g_tab, 0, sizeof(g_tab));
+	if (g_used)
+		memset(g_tab, 0, sizeof(g_tab));
 	g_used = 0;
+	g_lo = 0;
+	g_hi = 0;
 	g_freed_maps = 0;
 	g_armed_count = 0;
 	g_zm_bad_free = 0;
@@ -127,7 +130,10 @@ void	*__wrap_malloc(size_t n)
 	mprotect(base + len - pg, pg, PROT_NONE);
 	b = lookup((uintptr_t)(base + len - pg - n), 1);
 	if (!b)
+	{
+		munmap(base, len);
 		return (__real_malloc(n));
+	}
 	b->base = base;
 	b->maplen = len;
 	b->size = n;

@@ -128,18 +128,20 @@ def _seed_inventory_test(seed_type: str, quantity: int, unit: str, expected: str
 def _seed_signature_test():
     def runner(ctx: Context, directory: Path, timeout: int) -> PyOutcome:
         code = (
-            "import inspect, json\n"
+            "import inspect, json, typing\n"
             "_fn = getattr(mod, 'ft_seed_inventory', None)\n"
             "if not callable(_fn):\n"
             "    print(json.dumps({'ok': False, 'detail': 'missing function ft_seed_inventory()'}))\n"
             "else:\n"
             "    _sig = inspect.signature(_fn)\n"
             "    _params = list(_sig.parameters.values())\n"
+            "    _hints = typing.get_type_hints(_fn)\n"
+            "    _ret = _hints.get('return', inspect.Signature.empty)\n"
             "    _ok = (len(_params) == 3 "
-            "and _params[0].annotation is str "
-            "and _params[1].annotation is int "
-            "and _params[2].annotation is str "
-            "and _sig.return_annotation is None)\n"
+            "and _hints.get(_params[0].name) is str "
+            "and _hints.get(_params[1].name) is int "
+            "and _hints.get(_params[2].name) is str "
+            "and _ret in (None, type(None)))\n"
             "    print(json.dumps({'ok': _ok, 'detail': '' if _ok else 'signature mismatch', "
             "'expected': '(seed_type: str, quantity: int, unit: str) -> None', 'actual': str(_sig)}))\n"
         )

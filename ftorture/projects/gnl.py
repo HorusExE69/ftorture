@@ -172,31 +172,27 @@ class GnlProject(Project):
                 print(f"✘ BUFFER_SIZE={size}: " + ctx.message(
                     "cannot link tester; see", "impossible de lier le tester ; voir") + f" {out / 'link.log'}", flush=True)
                 continue
-            args = ["-f", key, "--no-summary", "--stats-out", ctx.stats]
+            args = ["-f", key]
             if ctx.options.timeout is None:
                 args.extend(["--timeout", str(self.timeout(size, largest))])
             if files:
                 # --file: only your files, for each selected BUFFER_SIZE
                 args.extend(["--name", "ton fichier :,fichier généré :"])
-            if last is not None:
-                args.extend(["--stats-in", ctx.stats, "--no-legend", "--no-banner"])
-            if part == previous_part:
-                args.append("--no-section")
             if size == "0" or (size != "def" and int(size) >= 10000000):
                 args.append("--spec-pass")
-            result = ctx.tester(executable, args, checks=last is None, function_filter=False)
+            result = ctx.stream_tester(executable, args, checks=last is None, function_filter=False)
             if result > 1:
                 return result
             last = executable
             previous_part = part
         if last is None:
-            return 1
-        args = ["--no-banner", "--no-legend", "--no-section", "--stats-in", ctx.stats,
-                "-f", "__resume__"]
+            if ctx.options.checks:
+                ctx.renderer.render_checks(ctx.checks_file)
+            return ctx.renderer.finish(extra_failed=True)
         if not bonus and ctx.options.part != 1:
-            args.extend(["--note", ctx.message("Bonus not tested: bonus files missing.",
-                                               "Bonus non testé : fichiers bonus absents.")])
-        return max(int(failed), ctx.tester(last, args, function_filter=False))
+            ctx.renderer.add_note(ctx.message("Bonus not tested: bonus files missing.",
+                                              "Bonus non testé : fichiers bonus absents."))
+        return ctx.renderer.finish(extra_failed=failed)
 
 
 # The subject asks for the three files at the root: no subfolder search.

@@ -79,7 +79,10 @@ def parse(text: str) -> list[Rule]:
             line = line[1:]
         if line in ("/", "!"):
             continue
-        rules.append(Rule(line))
+        try:
+            rules.append(Rule(line))
+        except re.error:
+            continue
     return rules
 
 

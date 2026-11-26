@@ -20,26 +20,19 @@ class PrintfProject(ArchiveProject):
             raise RunnerError(ctx.message("No bonus rule; no tests selected.",
                                           "Pas de règle bonus ; aucun test sélectionné."))
         first = True
-        status = 0
         for part, rule in ((1, "all"), (2, "bonus")):
             if (part == 1 and not mandatory) or (part == 2 and not bonus):
                 continue
             self.build_archive(ctx, rule)
             executable = self.link(ctx, f"tester-{part}")
-            args = ["-p", str(part)]
-            if not first:
-                args.extend(["--stats-in", ctx.stats, "--no-legend", "--no-banner"])
-            if part == 1 and bonus:
-                args.extend(["--no-summary", "--stats-out", ctx.stats])
-            elif part == 1 and ctx.options.part != 1:
-                args.extend(["--note", ctx.message("Bonus not tested: no bonus rule.",
-                                                   "Bonus non testé : pas de règle bonus.")])
-            result = ctx.tester(executable, args, checks=first)
+            result = ctx.stream_tester(executable, ["-p", str(part)], checks=first)
             if result > 1:
                 return result
-            status = max(status, result)
             first = False
-        return status
+        if not bonus and ctx.options.part != 1:
+            ctx.renderer.add_note(ctx.message("Bonus not tested: no bonus rule.",
+                                              "Bonus non testé : pas de règle bonus."))
+        return ctx.renderer.finish()
 
 
 PROJECT = PrintfProject(key="printf", name="ft_printf", aliases=("ft_printf",),

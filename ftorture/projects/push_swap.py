@@ -72,25 +72,14 @@ class PushSwapProject(ArchiveProject):
             note = ctx.message("Bonus not tested: no bonus rule.", "Bonus non testé : pas de règle bonus.")
         if ctx.options.part == 2 and not bonus:
             raise RunnerError(note or "")
-        executable = ctx.build / "tester"
-        ctx.require([*ctx.cc, *ctx.engine_flags("push_swap"), ctx.root / "src/engine.c",
-                     ctx.root / "src/memtrack.c", *sorted((ctx.root / "src/push_swap").glob("*.c")),
-                     "-Wl,--wrap=malloc", "-Wl,--wrap=free", "-lm", "-o", executable],
-                    ctx.build / "link.log")
-        args: list[str] = ["-p", "1"] if not bonus else (["-p", str(ctx.options.part)] if ctx.options.part else [])
-        if ctx.options.timeout is None:
-            args.extend(["--timeout", "20"])
-        if note:
-            args.extend(["--note", note])
         checker, where = self.official_checker(ctx)
         if checker:
-            ctx.env["FTORTURE_PS_CHECKER"] = str(checker)
             print("   ▶ " + ctx.message("official checker: ", "checker officiel : ") + where
                   + ctx.message(" (confirms the 100 / 500 sorts)", " (confirme les tris de 100 / 500)"), flush=True)
         else:
-            ctx.env.pop("FTORTURE_PS_CHECKER", None)
             print("   ▶ " + where, flush=True)
-        return max(failed, ctx.tester(executable, args, checks=True))
+        from .push_swap_tests import run_push_swap_suites
+        return max(failed, run_push_swap_suites(ctx, bonus=bonus, checker=checker, note=note))
 
     def cleanup(self, ctx: Context) -> None:
         if self.make(ctx, "fclean", log="fclean.log") == 0:

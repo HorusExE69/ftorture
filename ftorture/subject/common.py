@@ -174,11 +174,10 @@ def symbols(session: CheckSession, artifacts: list[Path]) -> list[tuple[str, str
         raise RunnerError(session.text("nm failed; see", "Échec de nm ; voir") + f" {session.directory}")
     result = []
     for line in output.splitlines():
-        columns = line.split()
-        if len(columns) >= 3 and re.fullmatch(r"[A-Za-z?]", columns[-2]):
-            prefix = columns[0]
-            owner = prefix[:-1] if prefix.endswith(":") else prefix.rpartition(":")[0]
-            result.append((columns[-2], columns[-1], owner))
+        match = re.match(r"^(.+?):(?:[0-9a-fA-F]+\s+|\s+)([A-Za-z?])\s+(\S+)$", line)
+        if match:
+            owner = match.group(1).rpartition(":")[2] or match.group(1)
+            result.append((match.group(2), match.group(3), owner))
     return result
 
 

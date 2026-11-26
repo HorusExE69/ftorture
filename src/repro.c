@@ -57,8 +57,12 @@ void	zft_register(const char *func, const char *name, t_kind kind, int spec,
 			void (*fn)(void), const char *file, int line, int idx)
 {
 	if (g_ntests < 512)
-		g_tests[g_ntests++] = (t_test){func, name, kind, spec, fn, file, line,
-			g_ntests, idx};
+	{
+		int	seq = g_ntests++;
+
+		g_tests[seq] = (t_test){func, name, kind, spec, fn, file, line,
+			seq + 1, idx};
+	}
 }
 
 void	zft_bench_register(const char *f, void (*fn)(long), const char *file,
@@ -286,9 +290,16 @@ const char	*zft_mem(const void *p, size_t n)
 	size_t				j = 0;
 	const unsigned char	*c = p;
 
+	if (!p)
+		return ("NULL");
+	b[0] = 0;
 	for (size_t i = 0; i < n && i < 64; i++)
 		j += (size_t)snprintf(b + j, 1100 - j, "%02x ", c[i]);
 	return (b);
+}
+
+void	zft_soft(void)
+{
 }
 
 static void	show_input(void)

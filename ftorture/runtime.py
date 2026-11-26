@@ -1,6 +1,7 @@
 """Shared subprocess, artifact, and C-engine interfaces."""
 from dataclasses import dataclass, field
 from contextlib import nullcontext
+import json
 from pathlib import Path
 import os
 import shlex
@@ -166,10 +167,59 @@ class Context:
             prefix.extend(["--seed", str(self.options.seed)])
         return shlex.join(prefix)
 
-    def tester(self, executable: Path, extra: list[str | Path], *,
-               checks: bool = False, function_filter: bool = True) -> int:
-        args = self.engine_args(function_filter=function_filter)
+    @property
+    def renderer(self):
+        if not hasattr(self, "_renderer"):
+            from .renderer import Renderer
+            self._renderer = Renderer(self.options, self.root / "ftorture.log", repro_prefix=self.repro_prefix())
+        return self._renderer
+
+    def stream_tester(self, executable: Path, extra: list[str | Path], *,
+                      checks: bool = False, function_filter: bool = True) -> int:
         if checks and self.options.checks:
-            args.extend(["--checks", self.checks_file])
-        status = self.command([executable, *args, *extra], cwd=self.build)
-        return 128 - status if status < 0 else status
+            self.renderer.render_checks(self.checks_file)
+        command = [str(arg) for arg in (executable, *self.engine_args(function_filter=function_filter), *extra)]
+        with subprocess.Popen(command, cwd=self.build, env=self.env,
+                              stdout=subprocess.PIPE, start_new_session=True) as process:
+            try:
+                assert process.stdout is not None
+                for raw in process.stdout:
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if not line:
+                        continue
+                    if line.startswith("{"):
+                        try:
+                            self.renderer.consume_c_event(json.loads(line))
+                            continue
+                        except ValueError:
+                            pass
+                    print(line, flush=True)
+                status = process.wait()
+                return 128 - status if status < 0 else status
+            except KeyboardInterrupt:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                finally:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+                raise
+
+    def tester(self, executable: Path, extra: list[str | Path], *,
+               checks: bool = False, function_filter: bool = True,
+               note: str | None = None, item_en: str = "functions",
+               item_fr: str = "fonctions") -> int:
+        status = self.stream_tester(executable, extra, checks=checks, function_filter=function_filter)
+        if status > 1:
+            return status
+        if note:
+            self.renderer.add_note(note)
+        return self.renderer.finish(item_en=item_en, item_fr=item_fr)

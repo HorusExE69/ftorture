@@ -131,9 +131,10 @@ def check_mypy(session: CheckSession, required_files: list[str], optional_files:
         session.check("SKIP", "mypy", "mypy", "no .py file", "aucun fichier .py")
         return
     directory = session.ctx.options.directory
+    cache_dir = str(session.directory / "mypy_cache")
     if required_files:
         status, output = session.capture(
-            ["mypy", "--ignore-missing-imports", "--no-error-summary", *required_files],
+            ["mypy", "--cache-dir", cache_dir, "--ignore-missing-imports", "--no-error-summary", *required_files],
             cwd=directory, name="mypy",
         )
         errors = [line.strip() for line in output.splitlines() if ": error:" in line]
@@ -148,7 +149,7 @@ def check_mypy(session: CheckSession, required_files: list[str], optional_files:
             session.details(errors or output.splitlines(), 8)
     if optional_files:
         status, output = session.capture(
-            ["mypy", "--ignore-missing-imports", "--no-error-summary", *optional_files],
+            ["mypy", "--cache-dir", cache_dir, "--ignore-missing-imports", "--no-error-summary", *optional_files],
             cwd=directory, name="mypy-optional",
         )
         errors = [line.strip() for line in output.splitlines() if ": error:" in line]

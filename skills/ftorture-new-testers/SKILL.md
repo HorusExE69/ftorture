@@ -18,17 +18,18 @@ Use this skill when changing **ftorture**, not a student's submission. Installat
 | `ftorture/projects/custom.py` | Versioned user manifests and command-suite lifecycle, separate from native C checks |
 | `ftorture/projects/archive.py` | Makefile/archive building and linking; compare `libft.py`/`printf.py` |
 | `ftorture/projects/gnl.py` | Example source-only strategy with multiple compiled test passes |
-| `ftorture/projects/push_swap.py` | Example executable strategy: `make`/`make bonus` build binaries, C suites fork/exec them |
+| `ftorture/projects/push_swap.py`, `push_swap_tests.py` | Pure-Python executable strategy: `make`/`make bonus` build binaries, Python runs them & replays stacks |
 | `ftorture/projects/python.py` | Reusable isolated Python test runner (`PythonProject`, `PySuite`, `PyTestCase`, subprocess helpers) |
 | `ftorture/projects/py00.py`, `py01.py` | Bundled 42 Python modules (*Growing Code* v3.0, *Code Cultivation* v3.2) |
 | `ftorture/repro.py`, `src/repro.c` | `--repro` / `--gdb` single-test C replay without fork (valgrind/gdb friendly) |
-| `ftorture/runtime.py` | `Options`, `Context`, subprocess cancellation, paths, compiler flags and C-engine arguments |
+| `ftorture/runtime.py` | `Options`, `Context`, subprocess cancellation, paths, compiler flags and C JSONL streaming |
+| `ftorture/renderer.py`, `ftorture/explain.py` | Unified Python presentation, `-v` explanations/source snippets, multi-pass aggregation, efficiency gauge, `RESULT` box and `ftorture.log` backend for all suites |
 | `ftorture/language.py` | English/French selection from locale and complete-message selection |
 | `ftorture/checks.py` | `CheckSession` probes/localized messages (`soft=True` for `-c/--chill`) and delimiter-safe `CheckReport` records |
 | `ftorture/subject/` | Native file, README, norm, include-use, symbol, prototype, `.gitignore`, Python AST/flake8/mypy (`python.py`) and project-specific checks |
 | `install.py` | Managed launcher, safe update, confirmed `--delete --confirm` uninstall, shell detection and consent-based PATH configuration |
 | `src/zft.h`, `src/project.h` | C test macros/helpers and suite descriptor contract |
-| `src/engine.c`, `src/memtrack.c` | Forked execution, reference comparison, efficiency benchmarks, allocation instrumentation and reports |
+| `src/engine.c`, `src/memtrack.c` | Lean JSONL-only C execution & benchmark shim (forked tests, `VS`/`MTEST`, `BENCH`, `hw_calibrate`) + guarded-memory allocation tracker |
 
 ## Integrate the project
 

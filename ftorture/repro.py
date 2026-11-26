@@ -76,11 +76,6 @@ def student_objects(ctx: Context, project: Project, token: Token) -> tuple[list[
             objects.append(obj)
         flags = ["-D", f"Z_BS={-1 if size == 'def' else size}", "-D", f"GNL_SUITE={token.suite or 'bs42'}"]
         return [*objects, "-Wl,--wrap=read"], flags
-    if project.key == "push_swap":
-        project.build(ctx)
-        if token.file == "t_checker.c":
-            project.build(ctx, "bonus")
-        return [], []
     # archive projects (libft, ft_printf)
     rule = "bonus" if "bonus" in token.file else "all"
     project.build_archive(ctx, rule)
@@ -94,7 +89,7 @@ def student_objects(ctx: Context, project: Project, token: Token) -> tuple[list[
 
 
 def run(ctx: Context, project: Project) -> int:
-    if project.custom or not project.requires_compiler:
+    if project.custom or not project.requires_compiler or project.key == "push_swap":
         raise RunnerError(ctx.message("--repro only works for the C suites.",
                                       "--repro ne marche que pour les suites C."))
     token = parse(ctx.options.repro or "")
@@ -131,9 +126,7 @@ def run(ctx: Context, project: Project) -> int:
                                     "own mallocs are not reported)",
                                     "valgrind absent : exécution simple (les fuites et les "
                                     "débordements de tes mallocs ne sont pas signalés)"), flush=True)
-    print("   " + ctx.message("command:", "commande :") + " "
-          + (f"FTORTURE_REPRO_PATH={shlex.quote(str(ctx.options.directory))} " if project.key == "push_swap" else "")
-          + shlex.join(command), flush=True)
+    print("   " + ctx.message("command:", "commande :") + " " + shlex.join(command), flush=True)
     # gdb needs the terminal: no private session, no captured output
     status = subprocess.call(command, env=env, cwd=ctx.build)
     return 128 - status if status < 0 else status
