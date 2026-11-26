@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from ..checks import CheckSession
 from ..runtime import Context, RunnerError
-from .common import (allowed_path, check_compile_commands, check_files, check_norm, check_readme,
+from .common import (allowed_path, check_bonus_files, check_compile_commands, check_files, check_norm, check_readme,
                      check_symbols, symbols)
 from .includes import IncludeAnalysis
 
@@ -129,6 +129,10 @@ def push_swap_checks(ctx: Context, project: "PushSwapProject") -> None:
                       "présente (checker)" if bonus else "absente ; checker non testé")
         _, dry = make("-nB", "all")
         check_compile_commands(session, dry)
+        if bonus:
+            # The general rule says *_bonus.{c,h}; this subject's checker table
+            # lists "*.h, *.c", so only a warning.
+            check_bonus_files(session, dry, make("-nB", "bonus")[1], required=False)
         project.build(ctx)
         _, output = make("-n", "all")
         session.check("KO" if relink(output) else "OK", "Relink", "Relink",

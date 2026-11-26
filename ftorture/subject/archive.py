@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from ..checks import CheckSession
 from ..runtime import Context, RunnerError
-from .common import (allowed_path, check_compile_commands, check_files, check_readme, check_norm,
+from .common import (allowed_path, check_bonus_files, check_compile_commands, check_files, check_readme, check_norm,
                      check_symbols, symbols)
 from .includes import IncludeAnalysis
 from .prototypes import check_prototypes, expected_prototypes
@@ -44,6 +44,8 @@ def archive_checks(ctx: Context, project: "ArchiveProject", *, algorithm: bool =
                           "présente" if bonus else "absente ; bonus non testé")
         _, dry = make("-nB", "all")
         check_compile_commands(session, dry)
+        if bonus or (project.key != "printf" and project.has_bonus(ctx)):
+            check_bonus_files(session, dry, make("-nB", "bonus")[1])
         archive_status = "KO" if "libtool" in dry else "OK" if re.search(r"(^|[\s/])ar\s", dry, re.M) else "WARN"
         session.check(archive_status, "Archive", "Archive", "use ar, not libtool", "utiliser ar, pas libtool", soft=True)
         project.build_archive(ctx)

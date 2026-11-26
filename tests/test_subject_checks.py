@@ -87,6 +87,39 @@ class FilePolicyTests(unittest.TestCase):
             (student / "includes/libft.h").unlink()
             self.assertIsNone(find_file(student, "libft.h"))
 
+    def test_bonus_only_files_must_end_in_bonus(self):
+        from ftorture.subject.common import check_bonus_files
+        with session_for("printf") as (session, student):
+            (student / "libft").mkdir()
+            for name, body in (("ft_printf.c", '#include "ft_printf.h"\n'), ("utils.c", ""),
+                               ("ft_printf.h", ""), ("flags.h", ""), ("libft/ft_strlen.c", ""),
+                               ("ft_printf_bonus.c", '#include "ft_printf_bonus.h"\n'),
+                               ("ft_printf_bonus.h", '#include "flags.h"\n'),
+                               ("flags.c", '#include "flags.h"\n')):
+                (student / name).write_text(body)
+            # libft is compiled by a recursive make, from its own folder
+            mandatory = "cc -Wall -c ft_strlen.c -o ft_strlen.o\ncc -Wall -c ft_printf.c\ncc -Wall -c ./utils.c\n"
+            bonus = mandatory.replace("ft_printf.c", "ft_printf_bonus.c") + "cc -Wall -c flags.c\n"
+            check_bonus_files(session, mandatory, bonus)
+            records = "\n".join(session.report.records)
+            self.assertIn("C|KO|Bonus file names|2 bonus-only files without _bonus", records)
+            self.assertIn("D|flags.c", records)
+            self.assertIn("D|flags.h", records)  # reached only from the bonus
+            self.assertNotIn("utils.c", records)   # shared with the mandatory part
+            self.assertNotIn("ft_strlen", records)
+            session.report.records.clear()
+            (student / "flags.c").rename(student / "flags_bonus.c")
+            (student / "flags.h").rename(student / "flags_bonus.h")
+            (student / "ft_printf_bonus.h").write_text('#include "flags_bonus.h"\n')
+            check_bonus_files(session, mandatory, bonus.replace("flags.c", "flags_bonus.c"))
+            # 2 sources + 2 headers
+            self.assertTrue(session.report.records[-1].startswith("C|OK|Bonus file names|4 bonus-only files"))
+            (student / "flags_bonus.c").rename(student / "flags.c")
+            check_bonus_files(session, mandatory, bonus, required=False)  # push_swap: only a warning
+            self.assertTrue(session.report.records[-2].startswith("C|WARN|Bonus file names|1 bonus-only"))
+            check_bonus_files(session, mandatory, mandatory)
+            self.assertTrue(session.report.records[-1].startswith("C|OK|Bonus file names|the bonus uses no file"))
+
     def test_git_is_ignored_and_extra_files_fail(self):
         with session_for() as (session, student):
             (student / ".git").mkdir()

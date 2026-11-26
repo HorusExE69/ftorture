@@ -226,3 +226,87 @@ def check_compile_commands(session: CheckSession, dry: str) -> None:
         session.check("OK" if cc_ok else "KO", "Compiler", "Compilateur", "cc required by subject", "cc imposé par le sujet", soft=True)
         if any("-std=c99" in args for args in commands):
             session.check("KO", "Flag -std=c99", "Flag -std=c99", "forbidden by subject", "interdit par le sujet", soft=True)
+
+
+def compiled_sources(root: Path, dry: str) -> set[str]:
+    """Project-relative .c files of every `cc -c` line printed by `make -nB`.
+    Recursive makes (libft/) print paths relative to their own folder: those
+    are matched by their trailing path inside the project."""
+    files = [path.relative_to(root).as_posix() for path in project_files(root) if path.suffix == ".c"]
+    found: set[str] = set()
+    for line in dry.splitlines():
+        try:
+            args = shlex.split(line)
+        except ValueError:
+            continue
+        if "-c" not in args:
+            continue
+        for arg in args:
+            if not arg.endswith(".c"):
+                continue
+            name = Path(arg).as_posix()     # also drops a leading ./
+            direct = Path(arg) if arg.startswith("/") else root / arg
+            if direct.is_file() and direct.resolve().is_relative_to(root.resolve()):
+                found.add(direct.resolve().relative_to(root.resolve()).as_posix())
+                continue
+            found.update(file for file in files if file == name or file.endswith("/" + name))
+    return found
+
+
+def bonus_header_closure(root: Path, sources: set[str]) -> set[str]:
+    """Project headers reached by #include "..." from these sources, transitively."""
+    from .includes import include_list
+    dirs = [d.relative_to(root).as_posix() for d in header_dirs(root)]
+    seen: set[str] = set()
+    todo = list(sources)
+    while todo:
+        current = todo.pop()
+        path = root / current
+        try:
+            includes = include_list(path.read_text(errors="replace"))
+        except OSError:
+            continue
+        for kind, name in includes:
+            if kind != "usr":
+                continue
+            for base in (path.parent, *(root / d for d in dirs)):
+                candidate = (base / name)
+                if candidate.is_file() and candidate.resolve().is_relative_to(root.resolve()):
+                    relative = candidate.resolve().relative_to(root.resolve()).as_posix()
+                    if relative not in seen:
+                        seen.add(relative)
+                        todo.append(relative)
+                    break
+    return seen
+
+
+def check_bonus_files(session: CheckSession, all_dry: str, bonus_dry: str, *, required: bool = True) -> None:
+    """The common 42 rule: bonuses go in *_bonus.c / *_bonus.h files. Only the
+    files the bonus build uses and the mandatory one does not are concerned
+    (shared helpers may keep their name)."""
+    root = session.ctx.options.directory
+    mandatory = compiled_sources(root, all_dry)
+    bonus = compiled_sources(root, bonus_dry)
+    only_sources = sorted(bonus - mandatory)
+    only_headers = sorted(bonus_header_closure(root, set(only_sources))
+                          - bonus_header_closure(root, mandatory))
+    bad = [name for name in only_sources if not name.endswith("_bonus.c")]
+    bad += [name for name in only_headers if not name.endswith("_bonus.h")]
+    if not bonus:
+        session.check("WARN", "Bonus file names", "Noms des fichiers bonus", "no compile command in make -nB bonus",
+                      "aucune compilation dans make -nB bonus")
+        return
+    if not only_sources and not only_headers:
+        session.check("OK", "Bonus file names", "Noms des fichiers bonus", "the bonus uses no file of its own",
+                      "le bonus n'a pas de fichier à lui")
+        return
+    status = ("KO" if required else "WARN") if bad else "OK"
+    note_en = "" if required else " (this subject lists *.c / *.h for the bonus)"
+    note_fr = "" if required else " (ce sujet liste *.c / *.h pour le bonus)"
+    session.check(status, "Bonus file names", "Noms des fichiers bonus",
+                  (f"{len(bad)} bonus-only files without _bonus" if bad
+                   else f"{len(only_sources) + len(only_headers)} bonus-only files, all *_bonus.c / *_bonus.h") + note_en,
+                  (f"{len(bad)} fichiers propres au bonus sans _bonus" if bad
+                   else f"{len(only_sources) + len(only_headers)} fichiers propres au bonus, tous en *_bonus.c / *_bonus.h") + note_fr,
+                  soft=True)
+    session.details(bad)
