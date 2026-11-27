@@ -11,6 +11,10 @@ from ..runtime import Context
 from .common import check_files, project_files
 
 BUILTIN_NAMES = frozenset(dir(builtins))
+# ValueError, ZeroDivisionError, Exception...: allowed where a subject says so
+BUILTIN_EXCEPTIONS = frozenset(name for name in dir(builtins)
+                               if isinstance(getattr(builtins, name), type)
+                               and issubclass(getattr(builtins, name), BaseException))
 TYPE_IMPORTS = frozenset({"typing", "__future__", "collections.abc"})
 PASCAL_RE = re.compile(r"^[A-Z][a-zA-Z0-9]*$")
 SNAKE_RE = re.compile(r"^_?[a-z][a-z0-9_]*$")
@@ -30,6 +34,9 @@ class ExerciseSpec:
     allowed_imports: frozenset[str] = frozenset()
     expected_functions: tuple[str, ...] = ()
     expected_classes: tuple[str, ...] = ()
+    # mypy error codes the subject asks to keep on purpose (py02 ex2: the
+    # deliberate "abc" + 1 that raises TypeError gives an [operator] error)
+    mypy_expected: frozenset[str] = frozenset()
 
     @property
     def relative_files(self) -> tuple[str, ...]:
@@ -119,7 +126,23 @@ def check_flake8(session: CheckSession, files: list[str]) -> None:
         session.details(lines, 8)
 
 
-def check_mypy(session: CheckSession, required_files: list[str], optional_files: list[str]) -> None:
+def _mypy_errors(output: str, expected: dict[str, frozenset[str]]) -> list[str]:
+    """mypy error lines, without the ones a subject asks to keep (by file + code)."""
+    errors = []
+    for line in output.splitlines():
+        if ": error:" not in line:
+            continue
+        rel = line.split(":", 1)[0]
+        code = line.rsplit("[", 1)[-1].rstrip("]").strip() if line.rstrip().endswith("]") else ""
+        if code and code in expected.get(rel, frozenset()):
+            continue
+        errors.append(line.strip())
+    return errors
+
+
+def check_mypy(session: CheckSession, required_files: list[str], optional_files: list[str],
+               expected: dict[str, frozenset[str]] | None = None) -> None:
+    expected = expected or {}
     if not session.ctx.options.norm:
         session.check("SKIP", "mypy", "mypy", "disabled (--no-norm)", "désactivé (--no-norm)")
         return
@@ -138,8 +161,9 @@ def check_mypy(session: CheckSession, required_files: list[str], optional_files:
              *required_files],
             cwd=directory, name="mypy",
         )
-        errors = [line.strip() for line in output.splitlines() if ": error:" in line]
-        bad = bool(status or errors)
+        errors = _mypy_errors(output, expected)
+        # mypy exits 1 for the expected errors too: only what is left counts
+        bad = bool(errors) or (status not in (0, 1))
         session.check(
             "KO" if bad else "OK", "mypy --strict", "mypy --strict",
             f"{len(errors)} type errors; see checks/ logs" if bad else "no type error in strict mode",
@@ -154,8 +178,8 @@ def check_mypy(session: CheckSession, required_files: list[str], optional_files:
              *optional_files],
             cwd=directory, name="mypy-optional",
         )
-        errors = [line.strip() for line in output.splitlines() if ": error:" in line]
-        if status or errors:
+        errors = _mypy_errors(output, expected)
+        if errors or status not in (0, 1):
             session.check(
                 "WARN", "mypy --strict (others)", "mypy --strict (autres)",
                 f"{len(errors)} type errors in exercises where typing is not required",
@@ -356,7 +380,8 @@ def python_checks(ctx: Context, specs: tuple[ExerciseSpec, ...], *,
         report.section(session.text("STYLE & TYPING", "STYLE & TYPAGE"))
         trees = check_syntax(session, all_py)
         check_flake8(session, present)
-        check_mypy(session, required_typed, optional_typed)
+        check_mypy(session, required_typed, optional_typed,
+                   {rel: spec.mypy_expected for spec in specs if spec.mypy_expected for rel in spec.relative_files})
         check_type_annotations(session, trees, required_typed, optional_typed)
 
         report.section("CODE")

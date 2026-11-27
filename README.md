@@ -16,6 +16,7 @@ and what it reads outside its memory.
 | **push_swap** | v1.2 | errors, the 4 strategies, `--bench`, 100 / 500 number thresholds, valgrind, `checker` bonus |
 | **py00** (`python-module-00`) | v3.0 | *Growing Code*: `ex0`–`ex7`, I/O, recursion, type annotations, `flake8`, `mypy --strict`, AST checks |
 | **py01** (`python-module-01`) | v3.2 | *Code Cultivation*: `ex0`–`ex6`, OOP, encapsulation, inheritance, `flake8`, `mypy --strict`, AST checks |
+| **py02** (`python-module-02`) | v3.0 | *Garden Guardian*: `ex0`–`ex4`, exceptions (`try`/`except`/`finally`, `raise`, custom exceptions), `flake8`, `mypy --strict`, AST checks |
 
 Inspired by [Caesarovich/zft](https://github.com/Caesarovich/zft): a C test engine
 with modular Python orchestration. Requires **Linux**, **Python 3.10+**, `cc`,
@@ -96,6 +97,7 @@ torture push_swap ~/push_swap -e     # a push_swap (+ checker), with efficiency
 torture ps -f errors,perf500 -v      # a few push_swap suites, every detail
 torture py00 ~/python-module-00 -v   # python-module-00 (Growing Code)
 torture py01 ~/python-module-01 -c   # python-module-01 (Code Cultivation), chill mode
+torture py02 ~/python-module-02      # python-module-02 (Garden Guardian)
 ```
 
 | Option | Effect |
@@ -461,7 +463,8 @@ perfect and real time of each function and every machine cost
 ## Python modules: typing
 
 Typing is checked like with `mypy --strict`: **`mypy --strict`** on the exercise files (✘
-where the subject requires typing: all of py01, py00's `ex7`; ▲ elsewhere), and, even
+where the subject requires typing: all of py01 and py02, py00's `ex7`; ▲ elsewhere; in py02's `ex2`
+the `[operator]` error of the `"abc" + 1` the subject asks for is accepted), and, even
 without mypy installed, an annotation check: every function (methods and nested functions
 included) has typed parameters and a return type, and a generic type has its parameters
 (`list[int]`, not `list`), in signatures and in variable annotations.

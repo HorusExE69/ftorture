@@ -432,3 +432,64 @@ class StrictTypingTests(unittest.TestCase):
         from ftorture.subject import python
         source = inspect.getsource(python.check_mypy)
         self.assertEqual(source.count('"--strict"'), 2)
+
+
+PY02 = Path(__file__).resolve().parent / "fixtures" / "py02"
+
+
+class Py02Tests(unittest.TestCase):
+    """python-module-02 (Garden Guardian v3.0): a correct solution passes,
+    each kind of mistake the subject describes is caught."""
+
+    def copy(self, tmp: str, **changes: str) -> Path:
+        import shutil
+        root = Path(tmp) / "m02"
+        shutil.copytree(PY02, root)
+        for rel, content in changes.items():
+            (root / rel.replace("__", "/")).write_text(content, encoding="utf-8")
+        return root
+
+    def test_registry_and_detection(self):
+        self.assertEqual(find("py02").key, "py02")
+        self.assertEqual(find("python-module-02").key, "py02")
+        self.assertEqual(detect(PY02).key, "py02")
+
+    def test_good_submission_passes_with_the_expected_mypy_error(self):
+        # ex2 keeps "abc" + 1 on purpose: mypy --strict reports it, ftorture accepts it
+        with tempfile.TemporaryDirectory(prefix="py02 good ") as tmp:
+            root = self.copy(tmp)
+            self.assertEqual(main(["py02", str(root), "--lang", "en", "--no-color", "--no-cache"]), 0)
+            self.assertEqual(list(root.rglob("__pycache__")), [])
+
+    def test_each_subject_mistake_is_caught(self):
+        good = {rel: (PY02 / rel).read_text() for rel in (
+            "ex1/ft_raise_exception.py", "ex2/ft_different_errors.py", "ex3/ft_custom_errors.py",
+            "ex4/ft_finally_block.py")}
+        cases = {
+            "ex1": {"ex1__ft_raise_exception.py": good["ex1/ft_raise_exception.py"].replace(
+                "temperature > 40", "temperature >= 40")},                       # 40 is allowed
+            "ex2": {"ex2__ft_different_errors.py": good["ex2/ft_different_errors.py"].replace(
+                'print("abc" + 1)', "pass")},                                    # no TypeError
+            "ex3": {"ex3__ft_custom_errors.py": good["ex3/ft_custom_errors.py"].replace(
+                "class PlantError(GardenError):", "class PlantError(Exception):")},
+            "ex4": {"ex4__ft_finally_block.py": good["ex4/ft_finally_block.py"].replace(
+                "    finally:\n        print(\"Closing watering system\")\n", "    print(\"Closing watering system\")\n")},
+        }
+        for exercise, change in cases.items():
+            with self.subTest(exercise=exercise), tempfile.TemporaryDirectory() as tmp:
+                root = self.copy(tmp, **change)
+                self.assertEqual(main(["py02", str(root), "-f", exercise, "--no-checks", "--no-color",
+                                       "--no-cache"]), 1)
+
+    def test_wrong_file_name_and_untyped_code_fail_the_checks(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.copy(tmp)
+            (root / "ex1/ft_raise_exception.py").rename(root / "ex1/ft_raise_exeption.py")
+            self.assertEqual(main(["py02", str(root), "-f", "ex0", "--no-color", "--no-cache"]), 1)
+        if shutil.which("mypy"):
+            with tempfile.TemporaryDirectory() as tmp:
+                untyped = (PY02 / "ex2/ft_different_errors.py").read_text().replace(
+                    "def garden_operations(operation_number: int) -> None:", "def garden_operations(operation_number):")
+                root = self.copy(tmp, **{"ex2__ft_different_errors.py": untyped})
+                self.assertEqual(main(["py02", str(root), "-f", "ex0", "--no-color", "--no-cache"]), 1)

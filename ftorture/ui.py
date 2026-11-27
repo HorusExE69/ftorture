@@ -81,7 +81,8 @@ class Terminal:
                     "gnl": ("> your gnl will talk", "> ta gnl va parler"),
                     "push_swap": ("> your push_swap will talk", "> ton push_swap va parler"),
                     "py00": ("> your python will talk", "> ton python va parler"),
-                    "py01": ("> your python will talk", "> ton python va parler")}
+                    "py01": ("> your python will talk", "> ton python va parler"),
+                    "py02": ("> your python will talk", "> ton python va parler")}
             tag = self.t(*tags.get(project.key, ("> your code will talk", "> ton code va parler")))
         self.write(f"   {self.medium}▚▚ {subtitle} ▞▞{self.reset}\n")
         self.write(f"   {self.ph}{tag}{self.reset}{self.escape('5')}{self.ph}_{self.reset}\n\n")
@@ -263,6 +264,8 @@ def choose_project(terminal: Terminal, registry: Registry):
         "py00": terminal.t("Growing Code · ex0-ex7 · flake8 · mypy", "Growing Code · ex0-ex7 · flake8 · mypy"),
         "py01": terminal.t("Code Cultivation · ex0-ex6 · OOP · flake8 · mypy",
                            "Code Cultivation · ex0-ex6 · POO · flake8 · mypy"),
+        "py02": terminal.t("Garden Guardian · ex0-ex4 · exceptions · flake8 · mypy",
+                           "Garden Guardian · ex0-ex4 · exceptions · flake8 · mypy"),
     }
     python = [project for project in projects if is_python(project) and not project.custom]
     # main menu: the C projects, one entry for every Python module, then custom suites

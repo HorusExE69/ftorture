@@ -16,6 +16,7 @@ qu'il fuit et ce qu'il lit en dehors de sa mémoire.
 | **push_swap** | v1.2 | erreurs, les 4 stratégies, `--bench`, seuils 100 / 500 nombres, valgrind, bonus `checker` |
 | **py00** (`python-module-00`) | v3.0 | *Growing Code* : `ex0`–`ex7`, I/O, récursion, typage, `flake8`, `mypy --strict`, vérifs AST |
 | **py01** (`python-module-01`) | v3.2 | *Code Cultivation* : `ex0`–`ex6`, POO, encapsulation, héritage, `flake8`, `mypy --strict`, vérifs AST |
+| **py02** (`python-module-02`) | v3.0 | *Garden Guardian* : `ex0`–`ex4`, exceptions (`try`/`except`/`finally`, `raise`, exceptions perso), `flake8`, `mypy --strict`, vérifs AST |
 
 Inspiré de [Caesarovich/zft](https://github.com/Caesarovich/zft) : moteur C et
 orchestration Python modulaire. Dépendances : **Linux**, **Python 3.10+**, `cc`,
@@ -95,6 +96,7 @@ torture push_swap ~/push_swap -e     # un push_swap (+ checker), avec l'efficaci
 torture ps -f errors,perf500 -v      # quelques suites push_swap, tous les détails
 torture py00 ~/python-module-00 -v   # python-module-00 (Growing Code)
 torture py01 ~/python-module-01 -c   # python-module-01 (Code Cultivation), mode chill
+torture py02 ~/python-module-02      # python-module-02 (Garden Guardian)
 ```
 
 | Option | Effet |
@@ -458,7 +460,8 @@ le temps parfait et le vrai temps de chaque fonction et tous les coûts de la ma
 ## Modules Python : typage
 
 Le typage est vérifié comme avec `mypy --strict` : **`mypy --strict`** sur les fichiers
-des exercices (✘ là où le sujet impose le typage : tout py01, `ex7` de py00 ; ▲ ailleurs),
+des exercices (✘ là où le sujet impose le typage : tout py01 et py02, `ex7` de py00 ; ▲ ailleurs ;
+dans `ex2` de py02, l'erreur `[operator]` du `"abc" + 1` voulu par le sujet est acceptée),
 et, même sans mypy installé, une vérification des annotations : chaque fonction (méthodes
 et fonctions imbriquées comprises) a ses paramètres et son retour typés, et un type
 générique a ses paramètres (`list[int]`, pas `list`), dans les signatures comme dans les
