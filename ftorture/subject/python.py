@@ -134,46 +134,62 @@ def check_mypy(session: CheckSession, required_files: list[str], optional_files:
     cache_dir = str(session.directory / "mypy_cache")
     if required_files:
         status, output = session.capture(
-            ["mypy", "--cache-dir", cache_dir, "--ignore-missing-imports", "--no-error-summary", *required_files],
+            ["mypy", "--strict", "--cache-dir", cache_dir, "--ignore-missing-imports", "--no-error-summary",
+             *required_files],
             cwd=directory, name="mypy",
         )
         errors = [line.strip() for line in output.splitlines() if ": error:" in line]
         bad = bool(status or errors)
         session.check(
-            "KO" if bad else "OK", "mypy (required)", "mypy (obligatoire)",
-            f"{len(errors)} type errors; see checks/ logs" if bad else "no type errors",
-            f"{len(errors)} erreurs de typage ; voir checks/" if bad else "aucune erreur de typage",
+            "KO" if bad else "OK", "mypy --strict", "mypy --strict",
+            f"{len(errors)} type errors; see checks/ logs" if bad else "no type error in strict mode",
+            f"{len(errors)} erreurs de typage ; voir checks/" if bad else "aucune erreur de typage en mode strict",
             soft=True,
         )
         if bad:
             session.details(errors or output.splitlines(), 8)
     if optional_files:
         status, output = session.capture(
-            ["mypy", "--cache-dir", cache_dir, "--ignore-missing-imports", "--no-error-summary", *optional_files],
+            ["mypy", "--strict", "--cache-dir", cache_dir, "--ignore-missing-imports", "--no-error-summary",
+             *optional_files],
             cwd=directory, name="mypy-optional",
         )
         errors = [line.strip() for line in output.splitlines() if ": error:" in line]
         if status or errors:
             session.check(
-                "WARN", "mypy (recommended)", "mypy (recommandé)",
-                f"{len(errors)} issues in optional exercises",
-                f"{len(errors)} remarques dans les exercices optionnels",
+                "WARN", "mypy --strict (others)", "mypy --strict (autres)",
+                f"{len(errors)} type errors in exercises where typing is not required",
+                f"{len(errors)} erreurs de typage dans les exercices où le typage n'est pas imposé",
             )
             session.details(errors, 6)
+        else:
+            session.check("OK", "mypy --strict (others)", "mypy --strict (autres)",
+                          "no type error in strict mode", "aucune erreur de typage en mode strict")
 
 
-def check_type_annotations(session: CheckSession, trees: dict[str, ast.Module],
-                           required_files: list[str]) -> None:
-    if not required_files:
-        return
-    missing: list[str] = []
-    for rel in required_files:
-        tree = trees.get(rel)
-        if tree is None:
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
+GENERICS = frozenset({"list", "dict", "set", "frozenset", "tuple", "type", "List", "Dict", "Set",
+                      "FrozenSet", "Tuple", "Type", "Iterable", "Iterator", "Sequence", "Mapping",
+                      "Callable", "Generator", "Optional", "Union"})
+
+
+def annotation_issues(rel: str, tree: ast.Module) -> list[str]:
+    """Every function (methods, nested ones too) needs typed parameters and a
+    return type, and a generic type needs its parameters (list[int], not
+    list), as mypy --strict asks; works even when mypy is not installed."""
+    issues: list[str] = []
+
+    def bare_generics(annotation: ast.expr | None) -> list[str]:
+        names = []
+        for node in ast.walk(annotation) if annotation is not None else ():
+            if isinstance(node, (ast.Name, ast.Attribute)):
+                name = node.id if isinstance(node, ast.Name) else node.attr
+                parent_subscripted = any(isinstance(sub, ast.Subscript) and sub.value is node
+                                         for sub in ast.walk(annotation))
+                if name in GENERICS and not parent_subscripted:
+                    names.append(name)
+        return names
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
             if node.args.vararg:
                 args.append(node.args.vararg)
@@ -181,17 +197,42 @@ def check_type_annotations(session: CheckSession, trees: dict[str, ast.Module],
                 args.append(node.args.kwarg)
             untyped = [arg.arg for arg in args if arg.arg not in ("self", "cls") and arg.annotation is None]
             if untyped:
-                missing.append(f"{rel}:{node.lineno} {node.name}() untyped param(s): {', '.join(untyped)}")
+                issues.append(f"{rel}:{node.lineno} {node.name}() untyped param(s): {', '.join(untyped)}")
             if node.returns is None:
-                missing.append(f"{rel}:{node.lineno} {node.name}() missing return type")
-    session.check(
-        "KO" if missing else "OK",
-        "Type annotations", "Annotations de type",
-        f"{len(missing)} missing annotations" if missing else "all required signatures typed",
-        f"{len(missing)} annotations manquantes" if missing else "toutes les signatures requises typées",
-        soft=True,
-    )
-    session.details(missing, 8)
+                issues.append(f"{rel}:{node.lineno} {node.name}() missing return type")
+            for annotation in [arg.annotation for arg in args] + [node.returns]:
+                for name in bare_generics(annotation):
+                    issues.append(f"{rel}:{node.lineno} {node.name}(): {name} without its type "
+                                  f"parameters ({name}[...])")
+        elif isinstance(node, ast.AnnAssign):
+            for name in bare_generics(node.annotation):
+                issues.append(f"{rel}:{node.lineno} {name} without its type parameters ({name}[...])")
+    return issues
+
+
+def check_type_annotations(session: CheckSession, trees: dict[str, ast.Module],
+                           required_files: list[str], optional_files: list[str] = ()) -> None:
+    for files, required in ((required_files, True), (optional_files, False)):
+        if not files:
+            continue
+        missing = [issue for rel in files if rel in trees for issue in annotation_issues(rel, trees[rel])]
+        if required:
+            session.check(
+                "KO" if missing else "OK",
+                "Type annotations", "Annotations de type",
+                f"{len(missing)} missing annotations" if missing else "every function fully typed",
+                f"{len(missing)} annotations manquantes" if missing else "toutes les fonctions entièrement typées",
+                soft=True,
+            )
+        else:
+            session.check(
+                "WARN" if missing else "OK",
+                "Type annotations (others)", "Annotations (autres)",
+                f"{len(missing)} missing where typing is not required" if missing else "every function fully typed",
+                f"{len(missing)} manquantes là où le typage n'est pas imposé" if missing
+                else "toutes les fonctions entièrement typées",
+            )
+        session.details(missing, 8)
 
 
 def check_top_level_policy(session: CheckSession, trees: dict[str, ast.Module],
@@ -316,7 +357,7 @@ def python_checks(ctx: Context, specs: tuple[ExerciseSpec, ...], *,
         trees = check_syntax(session, all_py)
         check_flake8(session, present)
         check_mypy(session, required_typed, optional_typed)
-        check_type_annotations(session, trees, required_typed)
+        check_type_annotations(session, trees, required_typed, optional_typed)
 
         report.section("CODE")
         check_top_level_policy(session, trees, specs)

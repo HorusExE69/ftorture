@@ -14,8 +14,8 @@ qu'il fuit et ce qu'il lit en dehors de sa mémoire.
 | **ft_printf** | v12.1 | `cspdiuxX%` + bonus `-0.`, largeur, `# +`, ~22 000 appels comparés à `printf` |
 | **get_next_line** | v14.3 | 14 `BUFFER_SIZE`, fichiers, stdin, pipe, erreurs de `read`, bonus multi-fd |
 | **push_swap** | v1.2 | erreurs, les 4 stratégies, `--bench`, seuils 100 / 500 nombres, valgrind, bonus `checker` |
-| **py00** (`python-module-00`) | v3.0 | *Growing Code* : `ex0`–`ex7`, I/O, récursion, typage, `flake8`, `mypy`, vérifs AST |
-| **py01** (`python-module-01`) | v3.2 | *Code Cultivation* : `ex0`–`ex6`, POO, encapsulation, héritage, `flake8`, `mypy`, vérifs AST |
+| **py00** (`python-module-00`) | v3.0 | *Growing Code* : `ex0`–`ex7`, I/O, récursion, typage, `flake8`, `mypy --strict`, vérifs AST |
+| **py01** (`python-module-01`) | v3.2 | *Code Cultivation* : `ex0`–`ex6`, POO, encapsulation, héritage, `flake8`, `mypy --strict`, vérifs AST |
 
 Inspiré de [Caesarovich/zft](https://github.com/Caesarovich/zft) : moteur C et
 orchestration Python modulaire. Dépendances : **Linux**, **Python 3.10+**, `cc`,
@@ -454,6 +454,15 @@ mesure de GNL sans `-D BUFFER_SIZE`.
 Les charges de travail et leur `COST()` sont dans `src/*/b_*.c` ; `ftorture.log` donne
 le temps parfait et le vrai temps de chaque fonction et tous les coûts de la machine
 (`FTORTURE_BENCH_DEBUG=1` les affiche en direct).
+
+## Modules Python : typage
+
+Le typage est vérifié comme avec `mypy --strict` : **`mypy --strict`** sur les fichiers
+des exercices (✘ là où le sujet impose le typage : tout py01, `ex7` de py00 ; ▲ ailleurs),
+et, même sans mypy installé, une vérification des annotations : chaque fonction (méthodes
+et fonctions imbriquées comprises) a ses paramètres et son retour typés, et un type
+générique a ses paramètres (`list[int]`, pas `list`), dans les signatures comme dans les
+annotations de variables.
 
 ## Vitesse
 

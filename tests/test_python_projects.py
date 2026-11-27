@@ -400,3 +400,35 @@ class PythonProjectsTests(unittest.TestCase):
             root = Path(tmp)
             write_tree(root, {"ex0/ft_hello_garden.py": GOOD_PY00["ex0/ft_hello_garden.py"]})
             self.assertEqual(main(["py00", str(root), "--repro", "t_part1.c#0", "--no-color"]), 2)
+
+
+class StrictTypingTests(unittest.TestCase):
+    def test_every_function_typed_and_generics_parametrized(self):
+        import ast
+        from ftorture.subject.python import annotation_issues
+        source = (
+            "def ok(a: int, *b: str, **c: float) -> list[int]:\n"
+            "    def inner(x: int) -> int:\n        return x\n    return [inner(a)]\n"
+            "def bare(a: list, b: dict[str, int]) -> dict:\n    return {}\n"
+            "def untyped(a, b: int):\n    pass\n"
+            "class A:\n    def m(self, n) -> None:\n        pass\n"
+            "values: list = []\n"
+            "good: dict[str, list[int]] = {}\n"
+        )
+        issues = annotation_issues("ex0/f.py", ast.parse(source))
+        text = "\n".join(issues)
+        self.assertNotIn("ok()", text)
+        self.assertNotIn("inner()", text)
+        self.assertIn("bare(): list without its type parameters", text)
+        self.assertIn("bare(): dict without its type parameters", text)
+        self.assertIn("untyped() untyped param(s): a", text)
+        self.assertIn("untyped() missing return type", text)
+        self.assertIn("m() untyped param(s): n", text)
+        self.assertIn("ex0/f.py:12 list without its type parameters", text)
+        self.assertNotIn(":13", text)
+
+    def test_mypy_runs_in_strict_mode(self):
+        import inspect
+        from ftorture.subject import python
+        source = inspect.getsource(python.check_mypy)
+        self.assertEqual(source.count('"--strict"'), 2)

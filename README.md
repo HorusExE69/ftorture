@@ -14,8 +14,8 @@ and what it reads outside its memory.
 | **ft_printf** | v12.1 | `cspdiuxX%` + bonus `-0.`, width, `# +`, ~22,000 calls compared with `printf` |
 | **get_next_line** | v14.3 | 14 `BUFFER_SIZE`s, files, stdin, pipe, `read` errors, multi-fd bonus |
 | **push_swap** | v1.2 | errors, the 4 strategies, `--bench`, 100 / 500 number thresholds, valgrind, `checker` bonus |
-| **py00** (`python-module-00`) | v3.0 | *Growing Code*: `ex0`–`ex7`, I/O, recursion, type annotations, `flake8`, `mypy`, AST checks |
-| **py01** (`python-module-01`) | v3.2 | *Code Cultivation*: `ex0`–`ex6`, OOP, encapsulation, inheritance, `flake8`, `mypy`, AST checks |
+| **py00** (`python-module-00`) | v3.0 | *Growing Code*: `ex0`–`ex7`, I/O, recursion, type annotations, `flake8`, `mypy --strict`, AST checks |
+| **py01** (`python-module-01`) | v3.2 | *Code Cultivation*: `ex0`–`ex6`, OOP, encapsulation, inheritance, `flake8`, `mypy --strict`, AST checks |
 
 Inspired by [Caesarovich/zft](https://github.com/Caesarovich/zft): a C test engine
 with modular Python orchestration. Requires **Linux**, **Python 3.10+**, `cc`,
@@ -457,6 +457,14 @@ every call. GNL is not measured without `-D BUFFER_SIZE`.
 The workloads and their `COST()` are in `src/*/b_*.c`; `ftorture.log` gives the
 perfect and real time of each function and every machine cost
 (`FTORTURE_BENCH_DEBUG=1` prints them live).
+
+## Python modules: typing
+
+Typing is checked like with `mypy --strict`: **`mypy --strict`** on the exercise files (✘
+where the subject requires typing: all of py01, py00's `ex7`; ▲ elsewhere), and, even
+without mypy installed, an annotation check: every function (methods and nested functions
+included) has typed parameters and a return type, and a generic type has its parameters
+(`list[int]`, not `list`), in signatures and in variable annotations.
 
 ## Speed
 
