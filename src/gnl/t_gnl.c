@@ -290,6 +290,103 @@ TEST(GNL_SUITE, "fd invalides : -1, non ouvert, fermé")
 	r = get_next_line(fd);
 	CHECK(r == NULL, "get_next_line sur un fd fermé doit renvoyer NULL");
 }
+TEST(GNL_SUITE, "fd très grands : 1024, 10 000, 65 535, INT_MAX")
+{
+	static const int	fds[] = {1024, 10000, 65535, INT_MAX, -42, INT_MIN};
+	char				*r;
+
+	/* a bonus array stash[fd] indexed without a bound check writes far
+	   outside it: NULL is expected, without a crash                      */
+	for (size_t k = 0; k < sizeof(fds) / sizeof(*fds); k++)
+	{
+		INPUT("get_next_line(%d)", fds[k]);
+		r = get_next_line(fds[k]);
+		CHECK(r == NULL, "fd %d jamais ouvert : NULL attendu, reçu %s", fds[k],
+			zft_str(r));
+	}
+}
+TEST(GNL_SUITE, "fd ouvert en écriture seule (read échoue)")
+{
+	char	path[] = "/tmp/ftorture_gnl_woXXXXXX";
+	int		fd = mkstemp(path);
+	char	*r;
+
+	if (fd >= 0)
+		write(fd, "abc\n", 4);
+	close(fd);
+	fd = open(path, O_WRONLY);
+	unlink(path);
+	INPUT("fd ouvert avec O_WRONLY sur \"abc\\n\"");
+	r = get_next_line(fd);
+	CHECK(r == NULL, "read() échoue (EBADF) : NULL attendu, reçu %s", zft_str(r));
+	r = get_next_line(fd);
+	CHECK(r == NULL, "rappel : NULL attendu, reçu %s", zft_str(r));
+	close(fd);
+}
+TEST(GNL_SUITE, "/dev/null : NULL tout de suite")
+{
+	int		fd = open("/dev/null", O_RDONLY);
+	char	*r;
+
+	INPUT("get_next_line(open(\"/dev/null\"))");
+	r = get_next_line(fd);
+	CHECK(r == NULL, "fichier vide : NULL attendu, reçu %s", zft_str(r));
+	close(fd);
+}
+FILE_TEST("fins de ligne \\r\\n", "ligne 1\r\nligne 2\r\n\r\nfin\r")
+FILE_TEST("lignes vides au début", "\n\n\nabc\ndef")
+TEST(GNL_SUITE, "tous les octets sauf \\0")
+{
+	char	d[600];
+	size_t	k = 0;
+	int		fd;
+
+	for (int r = 0; r < 2; r++)
+		for (int c = 1; c < 256; c++)
+			d[k++] = (char)c;	/* '\n' (10) ends the lines on its own */
+	fd = gnl_file(d, k);
+	EXPECT_FD(fd, d, k, "octets 1 à 255, deux fois");
+	close(fd);
+}
+TEST(GNL_SUITE, "même numéro de fd réutilisé après la fin")
+{
+	static const char	a[] = "premier\nfichier\n";
+	static const char	b[] = "second\nfichier, autre contenu\n";
+	int					fa = gnl_file(a, sizeof(a) - 1);
+	int					fb;
+
+	EXPECT_FD(fa, a, sizeof(a) - 1, "fichier A lu jusqu'au bout");
+	/* the next file gets the same number: nothing of A may come back */
+	fb = gnl_file(b, sizeof(b) - 1);
+	if (fb != fa)
+	{
+		dup2(fb, fa);
+		close(fb);
+	}
+	EXPECT_FD(fa, b, sizeof(b) - 1, "fichier B sur le même fd que A");
+	close(fa);
+}
+TEST(GNL_SUITE, "read() renvoie moins que demandé (lectures partielles)")
+{
+	size_t	cap = 30000;
+	char	*d = gbuf(cap, 0);
+	size_t	k = 0;
+	int		fd;
+
+	while (k < cap - 300)
+	{
+		size_t	l = zrand() % (BS < 200 ? (size_t)BS * 3 + 2 : 300);
+
+		for (size_t i = 0; i < l; i++)
+			d[k++] = (char)('a' + zrand() % 26);
+		d[k++] = '\n';
+	}
+	fd = gnl_file(d, k);
+	g_rd_short = 1;
+	EXPECT_FD(fd, d, k, "read() de 1 à BUFFER_SIZE octets au hasard");
+	g_rd_short = 0;
+	close(fd);
+}
 TEST(GNL_SUITE, "un dossier (read échoue avec EISDIR)")
 {
 	int		fd = open("/tmp", O_RDONLY);

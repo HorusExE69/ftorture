@@ -133,3 +133,51 @@ const char	*pf_rand_str(void)
 	b[l] = 0;
 	return (b);
 }
+
+static void	dirty_compare(const char *file, int line, const char *what)
+{
+	char	exp[1300];
+	char	got[1300];
+
+	if (g_pf_ft.ret == g_pf_rl.ret && g_pf_ft.len == g_pf_rl.len
+		&& memcmp(g_pf_ft.buf, g_pf_rl.buf, g_pf_ft.len) == 0)
+		return ;
+	show(exp, sizeof(exp), &g_pf_rl);
+	show(got, sizeof(got), &g_pf_ft);
+	zft_fail(file, line, what, exp, got);
+}
+
+#define DIRTY_WHY "un int est lu avec va_arg(ap, int) / (unsigned int) : " \
+	"les 32 bits hauts de son emplacement 64 bits ne sont pas définis " \
+	"(ici non nuls, comme souvent à la moulinette)"
+
+void	pf_dirty(const char *file, int line, const char *fmt, int v)
+{
+	INPUT("ft_printf(%s, %d) · 32 bits hauts de l'argument non nuls",
+		zft_str(fmt), v);
+	PF_RUN(g_pf_ft, ft_printf(fmt, DIRTY(v)));
+	PF_RUN(g_pf_rl, r_printf(fmt, v));
+	dirty_compare(file, line, DIRTY_WHY);
+}
+
+void	pf_dirty8(const char *file, int line, const char *fmt, const int *v)
+{
+	INPUT("ft_printf(%s, %d, %d, %d, %d, %d, %d, %d, %d) · 32 bits hauts "
+		"non nuls (les derniers sur la pile)", zft_str(fmt), v[0], v[1], v[2],
+		v[3], v[4], v[5], v[6], v[7]);
+	PF_RUN(g_pf_ft, ft_printf(fmt, DIRTY(v[0]), DIRTY(v[1]), DIRTY(v[2]),
+			DIRTY(v[3]), DIRTY(v[4]), DIRTY(v[5]), DIRTY(v[6]), DIRTY(v[7])));
+	PF_RUN(g_pf_rl, r_printf(fmt, v[0], v[1], v[2], v[3], v[4], v[5], v[6],
+			v[7]));
+	dirty_compare(file, line, DIRTY_WHY);
+}
+
+void	pf_multi(const char *file, int line, const char *fmt, const long *a)
+{
+	INPUT("ft_printf(%s, …8 arguments)", zft_str(fmt));
+	PF_RUN(g_pf_ft, ft_printf(fmt, a[0], a[1], a[2], a[3], a[4], a[5], a[6],
+			a[7]));
+	PF_RUN(g_pf_rl, r_printf(fmt, a[0], a[1], a[2], a[3], a[4], a[5], a[6],
+			a[7]));
+	pf_compare(file, line, &g_pf_ft, &g_pf_rl);
+}

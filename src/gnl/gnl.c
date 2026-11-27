@@ -8,6 +8,7 @@ ssize_t	__real_read(int fd, void *buf, size_t n);
 size_t	g_rd_bytes;
 int		g_rd_calls;
 int		g_rd_fail_at;
+int		g_rd_short;
 
 ssize_t	__wrap_read(int fd, void *buf, size_t n)
 {
@@ -19,6 +20,9 @@ ssize_t	__wrap_read(int fd, void *buf, size_t n)
 		errno = EIO;
 		return (-1);
 	}
+	/* short reads: a regular file may also return fewer bytes than asked */
+	if (g_rd_short && n > 1)
+		n = 1 + zrand() % n;
 	r = __real_read(fd, buf, n);
 	if (r > 0)
 		g_rd_bytes += (size_t)r;

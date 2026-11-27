@@ -189,3 +189,66 @@ SPEC_TEST(pf_undef, "%s NULL avec largeur / précision")
 	PF("[%.6s]", (char *)NULL);
 }
 SPEC_TEST(pf_undef, "flags sur %%")            { PF("%5%"); PF("%-5%|"); PF("%05%"); }
+
+/* ============================================ arguments read as an int == */
+/* same check as the mandatory part, through the flags                   */
+TEST(pf_combo, "flags : lit un int, pas un long (32 bits hauts sales)")
+{
+	static const char	*fmts[] = {"%-12d|", "%012d", "%.10d", "%+d", "% d",
+		"%#x", "%#X", "%08x", "%-10u|", "%.12u", "%10.5d", "%-+8i|", "%#.8x",
+		"%5c|", "%-5c|"};
+	static const int	v[] = {-1, 0, 42, -42, INT_MAX, INT_MIN, 255,
+		(int)0xdeadbeef};
+
+	for (size_t f = 0; f < sizeof(fmts) / sizeof(*fmts); f++)
+		for (size_t k = 0; k < sizeof(v) / sizeof(*v); k++)
+		{
+			if (fmts[f][strlen(fmts[f]) - 1] == 'c'
+				|| fmts[f][strlen(fmts[f]) - 2] == 'c')
+				pf_dirty(__FILE__, __LINE__, fmts[f], 'A' + (int)k);
+			else
+				pf_dirty(__FILE__, __LINE__, fmts[f], v[k]);
+		}
+}
+
+/* random flags, width and precision on every conversion they are defined
+   for, compared with printf                                             */
+TEST(pf_combo, "aléatoire : flags + largeur + précision (3000 cas)")
+{
+	char	fmt[64];
+
+	for (int k = 0; k < 3000; k++)
+	{
+		const char	*convs = "diuxXscp";
+		char		c = convs[zrand() % 8];
+		size_t		l = 0;
+
+		fmt[l++] = '%';
+		if (zrand() % 3 == 0)
+			fmt[l++] = '-';
+		else if (zrand() % 2 && c != 's' && c != 'c' && c != 'p')
+			fmt[l++] = '0';
+		if ((c == 'd' || c == 'i') && zrand() % 3 == 0)
+			fmt[l++] = zrand() % 2 ? '+' : ' ';
+		if ((c == 'x' || c == 'X') && zrand() % 3 == 0)
+			fmt[l++] = '#';
+		if (zrand() % 2)
+			l += (size_t)snprintf(fmt + l, sizeof(fmt) - l, "%u", zrand() % 25);
+		if (c != 'c' && c != 'p' && zrand() % 2)
+			l += (size_t)snprintf(fmt + l, sizeof(fmt) - l, ".%u", zrand() % 15);
+		fmt[l++] = c;
+		fmt[l++] = '|';
+		fmt[l] = 0;
+		/* '0' with a precision is ignored by printf for integers: defined */
+		if (c == 's')
+			pf_one_s(__FILE__, __LINE__, fmt, pf_rand_str());
+		else if (c == 'c')
+			pf_one_c(__FILE__, __LINE__, fmt, (int)(zrand() % 256));
+		else if (c == 'p')
+			pf_one_p(__FILE__, __LINE__, fmt, pf_rand_ptr());
+		else if (c == 'd' || c == 'i')
+			pf_one_i(__FILE__, __LINE__, fmt, pf_rand_int());
+		else
+			pf_one_u(__FILE__, __LINE__, fmt, pf_rand_uint());
+	}
+}

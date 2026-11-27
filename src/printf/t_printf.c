@@ -198,3 +198,121 @@ SPEC_TEST(pf_edge, "conversion inconnue (%k, %w)")
 	PF("%k");
 	PF("a%wb");
 }
+
+/* ============================================ arguments read as an int == */
+/* The %x bug of the moulinette: va_arg(ap, unsigned long) for an int prints
+   "ffffffffffffffff" for -1 when the upper half of the slot is not zero.  */
+static const int	g_dirty[] = {-1, 0, 1, 42, -42, 255, INT_MAX, INT_MIN,
+	(int)0xdeadbeef, 0x7fff, -0x8000, 1000000};
+
+#define DIRTY_TEST(K, CONV) \
+TEST(K, "lit un int, pas un long (32 bits hauts sales)") \
+{ for (size_t k = 0; k < sizeof(g_dirty) / sizeof(*g_dirty); k++) \
+	pf_dirty(__FILE__, __LINE__, CONV, g_dirty[k]); \
+	pf_dirty8(__FILE__, __LINE__, CONV " " CONV " " CONV " " CONV " " CONV " " \
+		CONV " " CONV " " CONV, g_dirty); }
+
+DIRTY_TEST(pf_d, "%d")
+DIRTY_TEST(pf_i, "%i")
+DIRTY_TEST(pf_u, "%u")
+DIRTY_TEST(pf_x, "%x")
+DIRTY_TEST(pf_X, "%X")
+TEST(pf_c, "lit un int, pas un long (32 bits hauts sales)")
+{
+	static const int	v[] = {'a', 'Z', '0', 0, 127, 200, ' ', '\n'};
+
+	for (size_t k = 0; k < sizeof(v) / sizeof(*v); k++)
+		pf_dirty(__FILE__, __LINE__, "[%c]", v[k]);
+	pf_dirty8(__FILE__, __LINE__, "%c%c%c%c%c%c%c%c", v);
+}
+TEST(pf_mix, "8 arguments, les derniers sur la pile, bits hauts sales")
+{
+	pf_dirty8(__FILE__, __LINE__, "%d|%i|%u|%x|%X|%c|%d|%x", g_dirty);
+	pf_dirty8(__FILE__, __LINE__, "%x %x %x %x %x %x %x %x", g_dirty + 4);
+}
+
+/* random formats of up to 8 conversions, one 64-bit slot per argument (an
+   int slot has dirty upper bits: libc reads the low 32 like va_arg(int)) */
+TEST(pf_mix, "aléatoire : 8 conversions par format (2000 cas)")
+{
+	char	fmt[256];
+	long	a[8];
+
+	for (int k = 0; k < 2000; k++)
+	{
+		size_t	l = 0;
+		int		n = 1 + (int)(zrand() % 8);
+
+		for (int i = 0; i < n; i++)
+		{
+			const char	*convs = "cspdiuxX%";
+			char		c = convs[zrand() % 9];
+
+			if (zrand() % 2)
+				l += (size_t)snprintf(fmt + l, sizeof(fmt) - l, "%s",
+					zrand() % 2 ? " " : "<>");
+			l += (size_t)snprintf(fmt + l, sizeof(fmt) - l, "%%%c", c);
+			if (c == 's')
+				a[i] = (long)pf_rand_str();
+			else if (c == 'p')
+				a[i] = (long)pf_rand_ptr();
+			else if (c == 'c')
+				a[i] = DIRTY(zrand() % 256);
+			else if (c == 'd' || c == 'i')
+				a[i] = DIRTY(pf_rand_int());
+			else if (c == '%')
+				a[i] = 0;
+			else
+				a[i] = DIRTY(pf_rand_uint());
+			if (c == '%')
+				i--, n--;
+		}
+		pf_multi(__FILE__, __LINE__, fmt, a);
+	}
+}
+
+/* ==================================================== more edge cases == */
+TEST(pf_s, "les 255 octets non nuls")
+{
+	char	s[256];
+
+	for (int i = 1; i < 256; i++)
+		s[i - 1] = (char)i;
+	s[255] = 0;
+	PF("%s", s);
+	PF("[%s|%s]", s + 100, s + 254);
+}
+TEST(pf_s, "plusieurs NULL et chaînes vides")
+{
+	PF("%s%s%s", (char *)NULL, "", (char *)NULL);
+	PF("[%s] [%s] [%s]", "", (char *)NULL, "x");
+}
+TEST(pf_mix, "format long sans conversion (20 000)")
+{
+	char	*f = gbuf(20001, 'f');
+
+	f[20000] = 0;
+	PF(f);
+}
+TEST(pf_pct, "%% collé aux conversions")
+{
+	PF("%%%d%%", 42);
+	PF("%%%s", "s");
+	PF("%%%c%%%c%%", 'a', 'b');
+	PF("%d%%%d", 1, 2);
+}
+TEST(pf_p, "pointeurs aléatoires (2000 cas)")
+{
+	for (int k = 0; k < 2000; k++)
+		pf_one_p(__FILE__, __LINE__, "%p", pf_rand_ptr());
+}
+TEST(pf_s, "chaînes aléatoires (2000 cas)")
+{
+	for (int k = 0; k < 2000; k++)
+		pf_one_s(__FILE__, __LINE__, "[%s]", pf_rand_str());
+}
+TEST(pf_c, "caractères aléatoires (1000 cas)")
+{
+	for (int k = 0; k < 1000; k++)
+		pf_one_c(__FILE__, __LINE__, "%c", (int)(zrand() % 256));
+}

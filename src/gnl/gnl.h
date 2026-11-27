@@ -23,6 +23,7 @@ char	*get_next_line(int fd) __attribute__((weak));
 extern size_t	g_rd_bytes;		/* bytes returned by read() so far          */
 extern int		g_rd_calls;		/* read() calls so far                      */
 extern int		g_rd_fail_at;	/* this read() call returns -1 (0 = never)  */
+extern int		g_rd_short;		/* 1: read() returns 1 to n bytes at random */
 
 /* temp file containing data (already unlinked), opened O_RDONLY */
 int		gnl_file(const char *data, size_t len);

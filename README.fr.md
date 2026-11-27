@@ -218,7 +218,14 @@ octet par octet** (y compris les `\0` de `%c`) et la **valeur de retour**.
 - **Partie obligatoire** (archive de `make`) : chaque conversion `c s p d i u x X %`
   (valeurs limites, `NULL` → `(null)` / `(nil)`, les 256 caractères, `INT_MIN`,
   `UINT_MAX`, pointeurs 64 bits…), mélanges, 24 arguments, sorties de plus de
-  10 000 octets, et du fuzzing.
+  10 000 octets, et du fuzzing (formats aléatoires jusqu'à 8 conversions).
+- **Arguments lus comme un `int`** : chaque `%c %d %i %u %x %X` reçoit aussi un
+  argument dont les 32 bits hauts de l'emplacement 64 bits sont **non nuls**, en
+  registre et sur la pile (au-delà du 6e argument). `va_arg(ap, int)` lit ce qu'il
+  faut ; un `va_arg(ap, unsigned long)` affiche `5a5a5a5affffffff` au lieu de
+  `ffffffff` pour `%x` et `-1`. C'est le bug que la moulinette trouve et qu'un appel
+  `printf("%x", -1)` normal cache (le registre a souvent ses bits hauts à 0). Même
+  vérification à travers les flags du bonus.
 - **Bonus** (archive de `make bonus`, testée dans une deuxième passe) : chaque flag
   (`-`, `0`, `.`, largeur, `#`, espace, `+`), leurs interactions (`'-'` annule `'0'`,
   `'+'` l'emporte sur `' '`, `.0` avec la valeur 0…) et **5 000 combinaisons aléatoires**
@@ -245,6 +252,10 @@ donne une ligne du rapport : 1, 2, 3, 5, 7, 10, 42, 100, 1024, 9999, 100 000,
 - **Chaque ligne renvoyée** est comparée à celle attendue, doit être un bloc `malloc`
   assez grand (pas un pointeur vers un buffer `static`) ; après la dernière ligne,
   `get_next_line` doit renvoyer `NULL`, puis encore `NULL`.
+- **Plus** : fins de ligne `\r\n`, lignes vides au début, les 255 octets non nuls,
+  `read()` qui rend moins que demandé, même numéro de fd réutilisé après la fin (rien de
+  l'ancien fichier ne doit revenir), fd ouvert en écriture seule, `/dev/null`, fd très
+  grands (1024, 10 000, 65 535, `INT_MAX`, négatifs : un `stash[fd]` sans borne y crashe).
 - **Autres fd** : entrée standard, **pipe** alimenté par petits morceaux (des `read`
   partiels), fd `-1`, jamais ouvert ou fermé, dossier.
 - **Erreurs** : un `read()` qui renvoie `-1` au milieu du fichier (il faut renvoyer

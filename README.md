@@ -231,7 +231,13 @@ byte by byte** (including the `\0` of `%c`) and the **return value**.
 - **Mandatory part** (archive from `make`): every conversion `c s p d i u x X %`
   (limit values, `NULL` → `(null)` / `(nil)`, all 256 characters, `INT_MIN`,
   `UINT_MAX`, 64-bit pointers…), mixes, 24 arguments, outputs over 10,000 bytes, and
-  fuzzing.
+  fuzzing (random formats of up to 8 conversions).
+- **Arguments read as an `int`**: every `%c %d %i %u %x %X` also gets an argument whose
+  64-bit slot has **non-zero upper 32 bits**, in a register and on the stack (past the
+  6th argument). `va_arg(ap, int)` reads the right value; `va_arg(ap, unsigned long)`
+  prints `5a5a5a5affffffff` instead of `ffffffff` for `%x` and `-1`. That is the bug
+  the moulinette finds and a plain `printf("%x", -1)` call hides (the register's upper
+  bits are often 0). Same check through the bonus flags.
 - **Bonus** (archive from `make bonus`, tested in a second pass): each flag (`-`, `0`,
   `.`, width, `#`, space, `+`), their interactions (`'-'` cancels `'0'`, `'+'` beats
   `' '`, `.0` with value 0…) and **5,000 random combinations** that are valid in C.
@@ -256,6 +262,10 @@ is one line of the report: 1, 2, 3, 5, 7, 10, 42, 100, 1024, 9999, 100,000,
 - **Every returned line** is compared with the expected one and must be a large enough
   `malloc` block (not a pointer into a `static` buffer); after the last line,
   `get_next_line` must return `NULL`, then `NULL` again.
+- **More**: `\r\n` line endings, empty lines at the start, the 255 non-zero bytes,
+  `read()` returning less than asked, the same fd number reused after the end (nothing
+  of the old file may come back), a write-only fd, `/dev/null`, very large fds (1024,
+  10 000, 65 535, `INT_MAX`, negatives: an unbounded `stash[fd]` crashes there).
 - **Other fds**: standard input, a **pipe** fed in small chunks (partial `read`s), fd
   `-1`, never opened or closed, a directory.
 - **Errors**: a `read()` returning `-1` in the middle of the file (it must return

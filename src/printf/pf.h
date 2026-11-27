@@ -45,6 +45,19 @@ void	pf_one_s(const char *file, int line, const char *fmt, const char *v);
 void	pf_one_p(const char *file, int line, const char *fmt, void *v);
 void	pf_one_c(const char *file, int line, const char *fmt, int v);
 
+/* An int argument whose 64-bit slot has garbage in its upper half: on x86-64
+   an int is passed in a 64-bit register or stack slot and only its low 32
+   bits are defined. va_arg(ap, int) / (unsigned int) reads exactly those;
+   va_arg(ap, long) / (unsigned long) reads the garbage too. The moulinette's
+   calls often leave such garbage, the tester's own calls usually do not.   */
+# define DIRTY(v) ((long)(0x5a5a5a5a00000000UL | (unsigned int)(v)))
+/* ft_printf(fmt, DIRTY(v)) must print what printf(fmt, v) prints          */
+void	pf_dirty(const char *file, int line, const char *fmt, int v);
+/* 8 arguments: the last ones go on the stack (4 bytes written, 8 read)     */
+void	pf_dirty8(const char *file, int line, const char *fmt, const int *v);
+/* fmt with up to 8 conversions of cspdiuxX%, one 64-bit slot per argument  */
+void	pf_multi(const char *file, int line, const char *fmt, const long *a);
+
 /* random building blocks */
 int			pf_rand_int(void);
 unsigned	pf_rand_uint(void);
