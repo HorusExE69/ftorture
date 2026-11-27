@@ -119,7 +119,26 @@ class GnlProject(Project):
         buffer = 42 if size == "def" else max(1, min(int(size), 4096))
         return min(600, 10 + int(largest / buffer * 1e-5 + largest * 5e-8))
 
+    def prestart(self, ctx: Context) -> None:
+        """Everything starts now (builds, normal passes, valgrind, sanitizers),
+        while the checks run; run() then only displays. Not with -e: the
+        normal passes are timed and must run alone."""
+        if not ctx.options.efficiency:
+            ctx.slow["gnl"] = ctx.background(self._launch, ctx)
+
     def run(self, ctx: Context) -> int:
+        future = ctx.slow.pop("gnl", None)
+        state = future.result() if future else self._launch(ctx)
+        try:
+            return self._display(ctx, state)
+        except KeyboardInterrupt:
+            ctx.stop_background()
+            raise
+        finally:
+            for pool in state.get("pools", ()):
+                pool.shutdown(wait=False, cancel_futures=True)
+
+    def _launch(self, ctx: Context) -> dict:
         bonus = all((ctx.options.directory / name).is_file() for name in (
             "get_next_line_bonus.c", "get_next_line_utils_bonus.c", "get_next_line_bonus.h"))
         passes = self.passes(ctx, bonus)
@@ -198,66 +217,75 @@ class GnlProject(Project):
                     job["san"] = out / "tester-san"
             return job
 
-        # Every BUFFER_SIZE is independent: build them all at once, then run
-        # the normal passes, the sanitizers and valgrind at the same time; the
-        # normal passes are displayed in their usual order as they finish.
-        try:
-            with ThreadPoolExecutor(sanitize.workers()) as pool:
-                jobs = list(pool.map(build, passes))
-            # -e times the code: then nothing else may run at the same time
-            timed = ctx.options.efficiency
-            with ThreadPoolExecutor(1 if timed else sanitize.workers()) as runs, ThreadPoolExecutor(3) as slow:
-                normal = {job["key"]: runs.submit(ctx.capture_tester, job["exe"], job["args"],
-                                                  function_filter=False)
-                          for job in jobs if job["exe"]}
-                late = []
-                if timed:
-                    for future in normal.values():
-                        future.result()
-                for job in jobs:
-                    if not job["exe"]:
-                        continue
-                    if vg_ok and job["size"] in vg_sizes.get(job["part"], ()):
-                        # the Bible and the 100 000 / 300 000 lines take minutes under
-                        # memcheck and use the same code as the shorter lines
-                        late.append(("vg", job, slow.submit(
-                            valgrind.execute, ctx, job["exe"], job["args"], job["key"],
-                            "Bible,100 000,lit le minimum,gros fichier,5 000 lignes")))
-                    if job["san"]:
-                        late.append(("san", job, slow.submit(sanitize.execute, ctx, job["san"], job["args"],
-                                                             job["key"])))
-                shown = False
-                failed = False
-                for job in jobs:
-                    if job["error"]:
-                        size = job["size"]
-                        if job["error"] == "compile":
-                            accepted = size == "0" and not ctx.options.speculative
-                            failed |= not accepted
-                            print(f"{'▲' if accepted else '✘'} BUFFER_SIZE={size}: " + ctx.message(
-                                "compilation failed; see", "échec de compilation ; voir") + f" {job['out']}",
-                                flush=True)
-                        else:
-                            failed = True
-                            print(f"✘ BUFFER_SIZE={size}: " + ctx.message(
-                                "cannot link tester; see", "impossible de lier le tester ; voir")
-                                + f" {job['out'] / 'link.log'}", flush=True)
-                        continue
-                    status, lines = normal[job["key"]].result()
-                    ctx.replay_tester(lines, checks=not shown)
-                    shown = True
-                    if status > 1:
-                        return status
-                vg_findings: list = []
-                san_findings: list = []
-                for kind, job, future in late:
-                    if kind == "vg":
-                        sanitize.merge(vg_findings, valgrind.gather(ctx, future.result()), f"{job['label']} · ")
-                    else:
-                        sanitize.merge(san_findings, sanitize.gather(ctx, future.result()), f"{job['label']} · ")
-        except KeyboardInterrupt:
-            ctx.kill_children()
-            raise
+        # Every BUFFER_SIZE is independent: build them all at once, then start
+        # the normal passes, the sanitizers and valgrind at the same time (one
+        # process per core, sanitize.SLOTS); _display shows the normal passes in
+        # their usual order as they finish.
+        with ThreadPoolExecutor(sanitize.workers()) as pool:
+            jobs = list(pool.map(build, passes))
+        # -e times the code: then nothing else may run at the same time
+        timed = ctx.options.efficiency
+        runs = ThreadPoolExecutor(1 if timed else sanitize.workers())
+        slow = ThreadPoolExecutor(32)
+
+        def normal_run(job: dict):
+            if timed:
+                return ctx.capture_tester(job["exe"], job["args"], function_filter=False)
+            with sanitize.SLOTS:
+                return ctx.capture_tester(job["exe"], job["args"], function_filter=False)
+        normal = {job["key"]: runs.submit(normal_run, job) for job in jobs if job["exe"]}
+        late = []
+        if timed:
+            for future in normal.values():
+                future.result()
+        for job in jobs:
+            if not job["exe"]:
+                continue
+            if vg_ok and job["size"] in vg_sizes.get(job["part"], ()):
+                # the Bible, the 10 000 / 100 000 / 300 000 lines and the big files take
+                # minutes under memcheck with a small buffer (a quadratic stash x the
+                # ~30x of valgrind) and go through the same code as the shorter lines
+                late.append(("vg", job, slow.submit(
+                    valgrind.execute, ctx, job["exe"], job["args"], job["key"],
+                    "Bible,ligne longue (10 000,100 000,lit le minimum,gros fichier,5 000 lignes")))
+            if job["san"]:
+                late.append(("san", job, slow.submit(sanitize.execute, ctx, job["san"], job["args"], job["key"])))
+        return {"jobs": jobs, "normal": normal, "late": late, "pools": (runs, slow), "bonus": bonus,
+                "vg_ok": vg_ok, "san_ok": san_ok}
+
+    def _display(self, ctx: Context, state: dict) -> int:
+        jobs, normal, late, bonus = state["jobs"], state["normal"], state["late"], state["bonus"]
+        vg_ok, san_ok = state["vg_ok"], state["san_ok"]
+        shown = False
+        failed = False
+        for job in jobs:
+            if job["error"]:
+                size = job["size"]
+                if job["error"] == "compile":
+                    accepted = size == "0" and not ctx.options.speculative
+                    failed |= not accepted
+                    print(f"{'▲' if accepted else '✘'} BUFFER_SIZE={size}: " + ctx.message(
+                        "compilation failed; see", "échec de compilation ; voir") + f" {job['out']}",
+                        flush=True)
+                else:
+                    failed = True
+                    print(f"✘ BUFFER_SIZE={size}: " + ctx.message(
+                        "cannot link tester; see", "impossible de lier le tester ; voir")
+                        + f" {job['out'] / 'link.log'}", flush=True)
+                continue
+            status, lines = normal[job["key"]].result()
+            ctx.replay_tester(lines, checks=not shown)
+            shown = True
+            if status > 1:
+                return status
+        vg_findings: list = []
+        san_findings: list = []
+        for kind, job, future in late:
+            dirs = ctx.wait(future)       # "▶ valgrind + sanitizers… 37/160"
+            if kind == "vg":
+                sanitize.merge(vg_findings, valgrind.gather(ctx, dirs), f"{job['label']} · ")
+            else:
+                sanitize.merge(san_findings, sanitize.gather(ctx, dirs), f"{job['label']} · ")
         if not shown:
             if ctx.options.checks:
                 ctx.renderer.render_checks(ctx.checks_file)

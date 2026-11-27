@@ -178,6 +178,9 @@ def _check_official(checker: Path | None, values: list[int], output: str, cwd: P
 def run_push_swap_suites(ctx: Context, *, bonus: bool, checker: Path | None,
                          note: str | None) -> int:
     renderer = ctx.renderer
+    # the -fsanitize pass runs in the background while the suites below run
+    from ..sanitize import push_swap_start
+    sanitized = None if ctx.options.efficiency else push_swap_start(ctx, bonus=bonus)
     directory = ctx.options.directory
     ps_bin = directory / "push_swap"
     ck_bin = directory / "checker"
@@ -531,8 +534,13 @@ def run_push_swap_suites(ctx: Context, *, bonus: bool, checker: Path | None,
 
     if note:
         renderer.add_note(note)
-    from ..sanitize import push_swap_pass
-    records = push_swap_pass(ctx, bonus=bonus)
-    if records:
-        renderer.render_records(records)
+    if sanitized is None and ctx.options.sanitize:
+        from ..sanitize import push_swap_pass
+        records = push_swap_pass(ctx, bonus=bonus)
+        if records:
+            renderer.render_records(records)
+    if sanitized is not None:
+        records = ctx.wait(sanitized)       # "▶ valgrind + sanitizers… 30/32"
+        if records:
+            renderer.render_records(records)
     return renderer.finish(item_en="suites", item_fr="suites")

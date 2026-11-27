@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 
 from .checks import CheckReport
 from .runtime import Context
@@ -179,34 +180,51 @@ def workers() -> int:
     return max(1, min(os.cpu_count() or 1, 8))
 
 
+# One slot per core for every background process (valgrind, sanitizer shards,
+# push_swap runs): many jobs can be submitted at once without overloading the
+# machine, and none waits behind a small fixed pool.
+SLOTS = threading.BoundedSemaphore(max(1, os.cpu_count() or 1))
+
+
+def run_slot(ctx: Context, args: list[str], *, timeout: int, **popen) -> subprocess.Popen | None:
+    """Start one background process when a core is free, wait for it, free the
+    core; counts it in the progress line. Returns the finished process."""
+    with SLOTS:
+        process = subprocess.Popen(args, start_new_session=True, **popen)
+        ctx.track(process)
+        try:
+            process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+    ctx.shard_done()
+    return process
+
+
 def run_sharded(ctx: Context, directory: Path, command, env_for, timeout: int) -> list[Path]:
-    """Run `command(shard_dir)` once per shard (--shard K/N: whole functions
-    split between N processes), all at the same time. Returns the shard dirs."""
+    """Run `command(shard_dir)` once per shard (--shard K/N: tests split between
+    N processes, --split: big FUZZ tests cut in N slices), each in its own
+    thread as soon as a core is free. Returns the shard dirs."""
     shutil.rmtree(directory, ignore_errors=True)
     total = workers()
-    dirs, procs = [], []
+    dirs = []
     ctx.shard_started(total)
+    threads = []
     for k in range(total):
         shard = directory / f"s{k}"
         shard.mkdir(parents=True)
-        log = open(shard / "output.log", "w")
-        # --split: every FUZZ test is cut in `total` slices, so no single big
-        # fuzzing test keeps one shard busy after the others are done
-        process = subprocess.Popen([*command(shard), "--shard", f"{k}/{total}", "--split", str(total)],
-                                   cwd=ctx.build,
-                                   env=env_for(shard), stdout=log, stderr=subprocess.STDOUT,
-                                   start_new_session=True)
-        ctx.track(process)
-        procs.append((process, log))
         dirs.append(shard)
-    for proc, log in procs:
-        try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-        log.close()
-        ctx.shard_done()
+
+        def one(shard: Path = shard, k: int = k) -> None:
+            with open(shard / "output.log", "w") as log:
+                run_slot(ctx, [*command(shard), "--shard", f"{k}/{total}", "--split", str(total)],
+                         timeout=timeout, cwd=ctx.build, env=env_for(shard), stdout=log,
+                         stderr=subprocess.STDOUT)
+        thread = threading.Thread(target=one, daemon=True)
+        thread.start()
+        threads.append(thread)
+    for thread in threads:
+        thread.join()
     return dirs
 
 
@@ -266,10 +284,18 @@ def write(ctx: Context, findings: list[Finding], *, skipped: str = "", label: st
     return path
 
 
+def push_swap_start(ctx: Context, *, bonus: bool):
+    """The push_swap -fsanitize pass in the background (it compares with the
+    normal binary itself, so it needs no verdict): a future of its records."""
+    if not ctx.options.sanitize:
+        return None
+    return ctx.background(lambda: push_swap_pass(ctx, bonus=bonus))
+
+
 def push_swap_pass(ctx: Context, *, bonus: bool) -> Path | None:
     """push_swap is a program: its sources are rebuilt with the sanitizers and
     run on sorts (each strategy, 3 to 500 numbers), errors, --bench and the
-    checker; every report becomes a finding."""
+    checker, all runs at the same time; every report becomes a finding."""
     import random
     from .subject.common import compiled_sources, header_dirs
     from .subject.push_swap import LEAK_RUNS
@@ -311,16 +337,14 @@ def push_swap_pass(ctx: Context, *, bonus: bool) -> Path | None:
 
     def execute(binary: Path, args: list[str], stdin: str | None, run_env: dict[str, str]):
         try:
-            done = subprocess.run([str(binary), *args], input=(stdin or "").encode(), env=run_env,
-                                  cwd=root, capture_output=True, timeout=60, check=False)
+            with SLOTS:
+                done = subprocess.run([str(binary), *args], input=(stdin or "").encode(), env=run_env,
+                                      cwd=root, capture_output=True, timeout=60, check=False)
             return done.returncode, done.stdout, done.stderr
         except subprocess.TimeoutExpired:
             return None
-    for index, (program, args, stdin) in enumerate(runs):
-        if program not in programs:
-            continue
-        shown = " ".join(args) if len(args) < 12 else " ".join(args[:10]) + f" … ({len(args)})"
-        mapping.append(f"{index}\t{program}\t0\t{index}\t./{program} {shown}" + (f" < {stdin!r}" if stdin else ""))
+
+    def one(index: int, program: str, args: list[str], stdin: str | None) -> None:
         run_env = dict(env)
         for key in ("ASAN_OPTIONS", "UBSAN_OPTIONS"):
             run_env[key] += f":log_path={directory}/t{index}"
@@ -329,6 +353,16 @@ def push_swap_pass(ctx: Context, *, bonus: bool) -> Path | None:
         # the normal build prints (the tests already checked that output)
         normal = execute(root / program, args, stdin, ctx.env) if (root / program).is_file() else None
         same[(program, index)] = sanitized is not None and sanitized == normal
+        ctx.shard_done()
+    todo = [(index, program, args, stdin) for index, (program, args, stdin) in enumerate(runs)
+            if program in programs]
+    for index, program, args, stdin in todo:
+        shown = " ".join(args) if len(args) < 12 else " ".join(args[:10]) + f" … ({len(args)})"
+        mapping.append(f"{index}\t{program}\t0\t{index}\t./{program} {shown}" + (f" < {stdin!r}" if stdin else ""))
+    ctx.shard_started(len(todo))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max(1, os.cpu_count() or 1)) as pool:
+        list(pool.map(lambda job: one(*job), todo))
     (directory / "tests.tsv").write_text("\n".join(mapping) + "\n")
     findings = collect(directory, root, lambda suite, index: same.get((suite, index)))
     for item in findings:

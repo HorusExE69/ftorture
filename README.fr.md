@@ -457,13 +457,15 @@ le temps parfait et le vrai temps de chaque fonction et tous les coûts de la ma
 ## Vitesse
 
 Sur une machine à 20 cœurs, un run complet (vérifications, tests, valgrind, sanitizers) :
-libft **~6 s** (92 s avant), ft_printf **~4 s** (24 s), get_next_line **~32 s** (126 s),
+libft **~6 s** (92 s avant), ft_printf **~4 s** (24 s), get_next_line **~10 s** (126 s), push_swap **~5 s** (11 s),
 sans aucun test en moins :
 
 - les enfants de test qui plantent exprès (tests `NULL`, crashs comparés à la libc) ne
   déclenchent plus de core dump ni le rapporteur de crash du système (apport) ;
 - valgrind et les sanitizers démarrent dès le début, en arrière-plan, pendant les
-  vérifications et les tests normaux (une ligne « ▶ valgrind + sanitizers… 5/16 » montre
+  vérifications et les tests normaux (get_next_line : tous ses `BUFFER_SIZE` ;
+  push_swap : ses exécutions sous valgrind et sous sanitizers, toutes en même temps), un
+  processus par cœur (une ligne « ▶ valgrind + sanitizers… 5/16 » montre
   ce qu'il reste s'il faut encore attendre) ; ils tournent en parallèle, découpés test
   par test, et les gros tests de fuzzing sont coupés en tranches qui rejouent exactement
   les mêmes cas (le passage normal les affiche toujours comme un seul test) ; les 18
@@ -492,7 +494,7 @@ malloc de ftorture pour que valgrind voie chaque bloc. Une section **VALGRIND** 
 
 Les déréférencements de `NULL` et les crashs identiques à la libc restent l'affaire des
 tests normaux, et les fuites celle du traqueur. get_next_line passe sous valgrind avec
-`BUFFER_SIZE` 1 et 42, sans la Bible ni les lignes de 100 000 (même code, des minutes de
+`BUFFER_SIZE` 1 et 42, sans la Bible ni les lignes de 10 000 et 100 000 (même code, des minutes de
 memcheck). `--no-valgrind` saute cette passe ; sans valgrind installé, la ligne est sautée.
 
 ## Sanitizers (`-fsanitize`)

@@ -55,17 +55,30 @@ def valgrind(session: CheckSession, bonus: bool) -> None:
         session.check("SKIP", "Leaks (valgrind)", "Fuites (valgrind)", "valgrind not installed",
                       "valgrind non installé")
         return
+    from concurrent.futures import ThreadPoolExecutor
+    from ..sanitize import SLOTS
     directory = session.ctx.options.directory
     errors, reachable = [], []
-    for program, args, stdin in LEAK_RUNS:
-        if program == "checker" and not bonus:
-            continue
+    runs = [run for run in LEAK_RUNS if run[0] != "checker" or bonus]
+    logs = []
+    for _ in runs:
         session.sequence += 1
-        log = session.directory / f"{session.sequence:03d}-valgrind.log"
+        logs.append(session.directory / f"{session.sequence:03d}-valgrind.log")
+    ctx = session.ctx
+
+    def memcheck(job) -> None:
+        (program, args, stdin), log = job
         command = ["valgrind", "--leak-check=full", "--show-leak-kinds=all", "--track-fds=no",
                    f"--log-file={log}", f"./{program}", *args]
-        session.ctx.command(command, cwd=directory, log=session.directory / f"{session.sequence:03d}-output.log",
-                            timeout=60, stdin=stdin)
+        with SLOTS:
+            ctx.command(command, cwd=directory, log=log.with_name(log.name.replace("valgrind", "output")),
+                        timeout=60, stdin=stdin)
+        ctx.shard_done()
+    # every run under valgrind at the same time, one per free core
+    ctx.shard_started(len(runs))
+    with ThreadPoolExecutor(len(runs) + 1) as pool:
+        ctx.wait(pool.submit(lambda: list(pool.map(memcheck, zip(runs, logs)))))
+    for (program, args, stdin), log in zip(runs, logs):
         output = log.read_text(errors="replace") if log.is_file() else ""
         shown = f"./{program} {' '.join(args)}".strip() + (f" < {stdin!r}" if stdin is not None else "")
 

@@ -460,13 +460,14 @@ perfect and real time of each function and every machine cost
 ## Speed
 
 On a 20-core machine, a full run (checks, tests, valgrind, sanitizers): libft **~6 s**
-(92 s before), ft_printf **~4 s** (24 s), get_next_line **~32 s** (126 s), with no test
+(92 s before), ft_printf **~4 s** (24 s), get_next_line **~10 s** (126 s), push_swap **~5 s** (11 s), with no test
 left out:
 
 - test children that crash on purpose (`NULL` tests, crashes compared with the libc) no
   longer trigger a core dump or the system crash reporter (apport);
 - valgrind and the sanitizers start right away, in the background, during the checks and
-  the normal tests (a "▶ valgrind + sanitizers… 5/16" line shows what is left if you
+  the normal tests (get_next_line: all its `BUFFER_SIZE`s; push_swap: its valgrind and
+  sanitizer runs, all at the same time), one process per core (a "▶ valgrind + sanitizers… 5/16" line shows what is left if you
   still have to wait); they run in parallel, split test by test, and the big fuzzing
   tests are cut into slices that replay exactly the same cases (the normal pass still
   shows each as one test); get_next_line's 18
@@ -492,7 +493,7 @@ error in your code:
 - `Invalid free`, `Mismatched free`, `Source and destination overlap`.
 
 `NULL` dereferences and libc-matching crashes stay with the normal tests, and leaks with
-the tracker. get_next_line runs under valgrind with `BUFFER_SIZE` 1 and 42, without the
+the tracker. get_next_line runs under valgrind with `BUFFER_SIZE` 1 and 42, without the 10 000 line,
 Bible or the 100 000 lines (same code, minutes of memcheck). `--no-valgrind` skips this
 pass; without valgrind installed, the line is skipped.
 
