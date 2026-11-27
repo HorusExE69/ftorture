@@ -493,8 +493,8 @@ error in your code:
 - `Invalid free`, `Mismatched free`, `Source and destination overlap`.
 
 `NULL` dereferences and libc-matching crashes stay with the normal tests, and leaks with
-the tracker. get_next_line runs under valgrind with `BUFFER_SIZE` 1 and 42, without the 10 000 line,
-Bible or the 100 000 lines (same code, minutes of memcheck). `--no-valgrind` skips this
+the tracker. get_next_line runs under valgrind with `BUFFER_SIZE` 1 and 42, without the
+Bible or the 10 000 / 100 000 lines (same code, minutes of memcheck). `--no-valgrind` skips this
 pass; without valgrind installed, the line is skipped.
 
 ## Sanitizers (`-fsanitize`)
