@@ -234,9 +234,20 @@ void	real_free(void *p)
 int		__sanitizer_get_ownership(const volatile void *p) __attribute__((weak));
 size_t	__sanitizer_get_allocated_size(const volatile void *p) __attribute__((weak));
 
+size_t	malloc_usable_size(void *p);
+int		g_zm_off;		/* sanitizer / valgrind pass: memtrack is off */
+
 size_t	alloc_size(const void *p)
 {
 	t_blk	*b = lookup((uintptr_t)p, 0);
+
+	/* valgrind pass: its malloc knows the blocks (0 for anything else) */
+	if ((!b || b->state != 1) && p && g_zm_off && !__sanitizer_get_ownership)
+	{
+		size_t	n = malloc_usable_size((void *)p);
+
+		return (n ? n : (size_t)-1);
+	}
 
 	if ((!b || b->state != 1) && p && __sanitizer_get_ownership
 		&& __sanitizer_get_ownership(p))

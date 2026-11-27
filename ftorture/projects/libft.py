@@ -12,7 +12,8 @@ class LibftProject(ArchiveProject):
         executable = self.link(ctx)
         args = ["-p", str(ctx.options.part)] if ctx.options.part else []
         return ctx.tester(executable, args, checks=True,
-                          after=lambda: self.sanitized(ctx, "all", args))
+                          after=lambda: [self.memchecked(ctx, "all", args),
+                                         self.sanitized(ctx, "all", args)])
 
 
 PROJECT = LibftProject(key="libft", name="libft", header="libft.h", subject="19.3",

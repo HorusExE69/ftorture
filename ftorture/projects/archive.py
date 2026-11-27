@@ -82,6 +82,32 @@ class ArchiveProject(Project):
         executable = self.link(ctx, f"tester-san-{rule}", archive=archive, flags=sanitize.LINK_FLAGS)
         return sanitize.write(ctx, sanitize.run(ctx, executable, args, rule), label=label)
 
+    def memchecked(self, ctx: Context, rule: str, args: list[str], label: str = "") -> Path | None:
+        """valgrind pass: the sources of `make -nB <rule>` rebuilt with -g (so
+        every error has its file:line even without -g in the Makefile), the
+        same tests, memtrack off so valgrind's malloc sees every block."""
+        from .. import sanitize, valgrind
+        from ..subject.common import compiled_sources, header_dirs
+        if not ctx.options.valgrind:
+            return None
+        if not valgrind.available():
+            return valgrind.records(ctx, [], label=label, skipped=ctx.message(
+                "valgrind not installed", "valgrind non installé"))
+        root = ctx.options.directory
+        dry = subprocess.run(["make", "--no-print-directory", "-C", str(root), "-nB", rule], env=ctx.env,
+                             capture_output=True, text=True, check=False).stdout
+        sources = [root / name for name in sorted(compiled_sources(root, dry))]
+        out = ctx.build / "valgrind" / f"obj-{rule}"
+        objects, _ = sanitize.compile_objects(ctx, sources, out, includes=header_dirs(root), flags=("-g", "-O0"))
+        if not objects:
+            return valgrind.records(ctx, [], label=label, skipped=ctx.message(
+                "sources do not compile alone; see ", "les sources ne compilent pas seules ; voir ") + str(out))
+        archive = out / f"g-{self.archive}"
+        archive.unlink(missing_ok=True)
+        ctx.require(["ar", "rcs", archive, *objects], out / "ar.log")
+        executable = self.link(ctx, f"tester-g-{rule}", archive=archive)
+        return valgrind.records(ctx, valgrind.run(ctx, executable, args, rule), label=label)
+
     def cleanup(self, ctx: Context) -> None:
         status = self.make(ctx, "fclean", log="fclean.log")
         if status == 0:

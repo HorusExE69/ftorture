@@ -111,6 +111,7 @@ torture py01 ~/python-module-01 -c   # python-module-01 (Code Cultivation), mode
 | `-c`, `--chill` | passe les vérifications style/hygiène KO (norminette, flake8/mypy, fichiers en trop, README, includes, hygiène Makefile) en avertissements (▲) |
 | `--no-checks` | saute Makefile / norme / nm / prototypes / vérifs AST Python |
 | `--no-norm` | saute norminette (C) ou flake8 / mypy (Python) |
+| `--no-valgrind` | saute la passe valgrind (memcheck) |
 | `--no-sanitize` | saute la passe `-fsanitize=address,undefined` |
 | `--no-hidden` | ignore les fichiers/dossiers cachés dans les vérifications des fichiers, includes et norminette |
 | `--seed N` | graine du fuzzing (42 par défaut) |
@@ -452,6 +453,26 @@ mesure de GNL sans `-D BUFFER_SIZE`.
 Les charges de travail et leur `COST()` sont dans `src/*/b_*.c` ; `ftorture.log` donne
 le temps parfait et le vrai temps de chaque fonction et tous les coûts de la machine
 (`FTORTURE_BENCH_DEBUG=1` les affiche en direct).
+
+## Valgrind (memcheck)
+
+Comme à la correction, libft, ft_printf et get_next_line repassent **sous valgrind**
+(push_swap l'était déjà dans ses vérifications) : ton code recompilé avec `-g` (pour avoir
+`fichier.c:ligne` même si ton Makefile ne le met pas), les mêmes tests, sans le traqueur de
+malloc de ftorture pour que valgrind voie chaque bloc. Une section **VALGRIND** liste, en
+✘, chaque erreur dans ton code :
+
+- `Invalid read` / `Invalid write` (un octet après un bloc, use after free…) ;
+- `Conditional jump or move depends on uninitialised value(s)`, `Use of uninitialised
+  value`, `Syscall param … uninitialised byte(s)` : l'endroit où la valeur sert, et le
+  `malloc` qui l'a créée (`--track-origins`) : un `ft_calloc` pas remis à zéro, une chaîne
+  sans son `'\0'`, un tableau lu avant d'être rempli ;
+- `Invalid free`, `Mismatched free`, `Source and destination overlap`.
+
+Les déréférencements de `NULL` et les crashs identiques à la libc restent l'affaire des
+tests normaux, et les fuites celle du traqueur. get_next_line passe sous valgrind avec
+`BUFFER_SIZE` 1 et 42, sans la Bible ni les lignes de 100 000 (même code, des minutes de
+memcheck). `--no-valgrind` saute cette passe ; sans valgrind installé, la ligne est sautée.
 
 ## Sanitizers (`-fsanitize`)
 

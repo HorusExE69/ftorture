@@ -34,6 +34,7 @@ class Options:
     no_color: bool = False
     ignore_hidden: bool = False
     sanitize: bool = True           # -fsanitize=address,undefined pass (--no-sanitize)
+    valgrind: bool = True           # memcheck pass on the same tests (--no-valgrind)
     files: tuple[str, ...] = ()     # gnl --file: paths or sizes (normalized by the project)
     checker: str | None = None      # push_swap --checker: the official checker_linux
     repro: str | None = None        # --repro FILE#IDX[mK][@SUITE[=BS]]: rebuild one test alone
@@ -224,8 +225,9 @@ class Context:
         if after is not None:
             # e.g. the -fsanitize pass: its section comes before the summary
             records = after()
-            if records:
-                self.renderer.render_records(records)
+            for path in records if isinstance(records, list) else [records]:
+                if path:
+                    self.renderer.render_records(path)
         if note:
             self.renderer.add_note(note)
         return self.renderer.finish(item_en=item_en, item_fr=item_fr)

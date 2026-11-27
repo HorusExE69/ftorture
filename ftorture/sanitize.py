@@ -43,14 +43,14 @@ def environment(ctx: Context, directory: Path) -> dict[str, str]:
 
 
 def compile_objects(ctx: Context, sources: list[Path], out: Path, *, defines: list[str] = (),
-                    includes: list[Path] = ()) -> tuple[list[Path], str]:
-    """Each source compiled with the sanitizers. Returns (objects, error log)."""
+                    includes: list[Path] = (), flags: tuple[str, ...] = SAN_FLAGS) -> tuple[list[Path], str]:
+    """Each source compiled with the sanitizers (or `flags`). Returns (objects, error log)."""
     out.mkdir(parents=True, exist_ok=True)
     objects = []
     for index, source in enumerate(sources):
         obj = out / f"{index:03d}-{source.stem}.o"
         log = out / f"{index:03d}-{source.stem}.log"
-        if ctx.command([*ctx.cc, *SAN_FLAGS, "-w", *defines, *(f"-I{d}" for d in includes),
+        if ctx.command([*ctx.cc, *flags, "-w", *defines, *(f"-I{d}" for d in includes),
                         "-c", source, "-o", obj], log=log):
             return [], log.read_text(errors="replace")
         objects.append(obj)
@@ -194,19 +194,21 @@ def run(ctx: Context, executable: Path, args: list[str | Path], name: str) -> li
     return collect(directory, ctx.options.directory, passed)
 
 
-def write(ctx: Context, findings: list[Finding], *, skipped: str = "", label: str = "") -> Path:
-    """SANITIZERS records, in the format of the checks report."""
+def write(ctx: Context, findings: list[Finding], *, skipped: str = "", label: str = "",
+          title: str = "SANITIZERS · -fsanitize=address,undefined", tool: str = "ASan + UBSan",
+          clean: str = "") -> Path:
+    """SANITIZERS (or VALGRIND) records, in the format of the checks report."""
     report = CheckReport()
     t = ctx.message
-    report.section("SANITIZERS · -fsanitize=address,undefined" + (f" · {label}" if label else ""))
+    report.section(title + (f" · {label}" if label else ""))
     # ASan and UBSan both see an out-of-bounds stack/global write: keep ASan's
     asan_at = {item.where for item in findings if "overflow" in item.kind and not item.overflow}
     findings = [item for item in findings if not (item.kind == "out-of-bounds" and item.where in asan_at)]
     if skipped:
-        report.check("SKIP", "ASan + UBSan", skipped)
+        report.check("SKIP", tool, skipped)
     elif not findings:
-        report.check("OK", "ASan + UBSan", t("no overflow, out-of-bounds access or undefined behavior",
-                                             "aucun overflow, accès hors limites ni comportement indéfini"))
+        report.check("OK", tool, clean or t("no overflow, out-of-bounds access or undefined behavior",
+                                            "aucun overflow, accès hors limites ni comportement indéfini"))
     for item in findings:
         if item.compensated:
             # the overflows cancel out: every test it happened in got the right result
@@ -217,7 +219,7 @@ def write(ctx: Context, findings: list[Finding], *, skipped: str = "", label: st
             report.check("WARN" if item.speculative else "KO", f"{item.function}", f"{item.where} · {item.message}")
         more = len(item.tests) - 1
         report.detail(t("test: ", "test : ") + item.tests[0] + (t(f" (+{more} other)", f" (+{more} autre(s))") if more > 0 else ""))
-    path = ctx.build / "sanitize" / f"records-{os.getpid()}-{label or 'all'}.txt"
+    path = ctx.build / "sanitize" / f"records-{os.getpid()}-{tool.split()[0]}-{label or 'all'}.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
     report.write(path)
     return path

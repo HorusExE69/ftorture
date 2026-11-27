@@ -4,7 +4,7 @@ import gzip
 import re
 
 from .base import Project
-from .. import sanitize
+from .. import sanitize, valgrind
 from ..subject.gnl import gnl_checks
 from ..runtime import Context, RunnerError
 
@@ -130,6 +130,12 @@ class GnlProject(Project):
         files, largest = self.files(ctx)
         san_ok = ctx.options.sanitize and sanitize.available(ctx)
         san_findings: list = []
+        vg_findings: list = []
+        vg_ok = ctx.options.valgrind and valgrind.available()
+        # memcheck is ~20x slower: BUFFER_SIZE 1 and 42 (or the first selected) per part
+        vg_sizes = {part: ({"1", "42"} & {size for p, size, _ in passes if p == part})
+                    or {next(size for p, size, _ in passes if p == part)}
+                    for part in {p for p, _, _ in passes}}
         if files:
             ctx.env["FTORTURE_GNL_FILES"] = files
         for source in ("engine", "memtrack"):
@@ -149,7 +155,8 @@ class GnlProject(Project):
             compiled = True
             for name in (f"get_next_line{suffix}", f"get_next_line_utils{suffix}"):
                 obj = out / f"{name}.o"
-                if not ctx.compile(["-Wall", "-Wextra", "-Werror", *definitions,
+                # -g: valgrind and the replays show your file:line
+                if not ctx.compile(["-Wall", "-Wextra", "-Werror", "-g", *definitions,
                                     f"-I{ctx.options.directory}", "-c",
                                     ctx.options.directory / f"{name}.c", "-o", obj],
                                    out / f"{name}.log"):
@@ -188,6 +195,13 @@ class GnlProject(Project):
                 return result
             last = executable
             previous_part = part
+            if vg_ok and size in vg_sizes.get(part, ()):
+                label = f"BUFFER_SIZE={size}" + (" (bonus)" if part == 2 else "")
+                # the Bible and the 100 000 / 300 000 lines take minutes under
+                # memcheck and use the same code as the shorter lines
+                sanitize.merge(vg_findings, valgrind.run(
+                    ctx, executable, args, key, skip="Bible,100 000,lit le minimum,gros fichier,5 000 lignes"),
+                    f"{label} · ")
             # -fsanitize: same tests with the sources rebuilt under ASan + UBSan
             # (not 0 and 10M+: no line read / a buffer that big on the stack)
             if san_ok and size != "0" and (size == "def" or int(size) < 10000000):
@@ -207,6 +221,9 @@ class GnlProject(Project):
             if ctx.options.checks:
                 ctx.renderer.render_checks(ctx.checks_file)
             return ctx.renderer.finish(extra_failed=True)
+        if ctx.options.valgrind:
+            ctx.renderer.render_records(valgrind.records(ctx, vg_findings, skipped="" if vg_ok else ctx.message(
+                "valgrind not installed", "valgrind non installé")))
         if ctx.options.sanitize:
             ctx.renderer.render_records(sanitize.write(ctx, san_findings, skipped="" if san_ok else ctx.message(
                 "this compiler cannot link -fsanitize=address,undefined",

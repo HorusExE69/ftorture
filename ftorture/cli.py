@@ -103,6 +103,8 @@ def parser(lang: str) -> argparse.ArgumentParser:
     result.add_argument("--no-norm", action="store_true", help=t("skip norminette (or flake8/mypy)", "ignorer norminette (ou flake8/mypy)"))
     result.add_argument("--no-sanitize", action="store_true", help=t(
         "skip the -fsanitize=address,undefined pass", "sauter la passe -fsanitize=address,undefined"))
+    result.add_argument("--no-valgrind", action="store_true", help=t(
+        "skip the valgrind (memcheck) pass", "sauter la passe valgrind (memcheck)"))
     result.add_argument("--no-hidden", action="store_true", help=t("ignore hidden files and folders", "ignorer les fichiers et dossiers cachés"))
     result.add_argument("--no-color", action="store_true", help=t("disable colors", "désactiver les couleurs"))
     result.add_argument("--repro", metavar="TEST", help=t(
@@ -196,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
                           files=tuple(item for value in args.files for item in value.split(",") if item.strip()),
                           checker=args.checker,
                           sanitize=not args.no_sanitize,
+                          valgrind=not args.no_valgrind,
                           repro=args.repro, gdb=args.gdb)
         if args.gdb and not args.repro:
             cli.error("--gdb needs --repro")

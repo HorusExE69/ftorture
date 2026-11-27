@@ -51,8 +51,9 @@ static struct s_opt
 	int			english;
 	int			eff;
 	int			eff_target;
-	const char	*names;
-}	o = {0, 0, NULL, ".", 42, 3, 0, 0, 0, 50, NULL};
+	const char	*names;			/* --name: only tests whose name has one item  */
+	const char	*skip_names;	/* --skip-name: not the tests that have one    */
+}	o = {0, 0, NULL, ".", 42, 3, 0, 0, 0, 50, NULL, NULL};
 
 #define L(fr, en) (o.english ? (en) : (fr))
 
@@ -380,6 +381,22 @@ typedef struct s_run
 void	__sanitizer_set_report_path(const char *path) __attribute__((weak));
 static const char	*g_san_dir;
 
+/* the raw (untranslated) name contains one of the comma-separated items */
+static int	name_has(const char *name, const char *list)
+{
+	while (*list)
+	{
+		size_t	l = strcspn(list, ",");
+		char	w[256];
+
+		snprintf(w, sizeof(w), "%.*s", (int)(l < 255 ? l : 255), list);
+		if (l && strstr(name, w))
+			return (1);
+		list += l + (list[l] == ',');
+	}
+	return (0);
+}
+
 static void	san_map(void)
 {
 	char	path[4096];
@@ -436,6 +453,20 @@ static void	run_child(const t_test *t, int ref, int fail_at, t_run *out)
 		g_armed = 0;
 		zm_reset();
 		g_zm_active = !ref && !g_san_dir;
+		if (g_san_dir)
+		{
+			/* valgrind pass: pid -> test, read back with its vg.<pid> logs */
+			char	mp[4096];
+			FILE	*mf;
+
+			snprintf(mp, sizeof(mp), "%s/pid%d", g_san_dir, (int)getpid());
+			mf = fopen(mp, "w");
+			if (mf)
+			{
+				fprintf(mf, "%d %d\n", t->seq, ref);
+				fclose(mf);
+			}
+		}
 		if (g_san_dir && __sanitizer_set_report_path)
 		{
 			static char	rp[4096];
@@ -1251,6 +1282,8 @@ int	main(int ac, char **av)
 			o.spec_pass = 1;
 		else if (!strcmp(a, "--name") && i + 1 < ac)
 			o.names = av[++i];
+		else if (!strcmp(a, "--skip-name") && i + 1 < ac)
+			o.skip_names = av[++i];
 		else if (!strcmp(a, "-v") || !strcmp(a, "--verbose")
 			|| !strcmp(a, "--no-color") || !strcmp(a, "--no-banner")
 			|| !strcmp(a, "--json"))
@@ -1268,24 +1301,15 @@ int	main(int ac, char **av)
 			MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	if (g_shm == MAP_FAILED)
 		return (perror("mmap"), 2);
-	if (o.names)
+	if (o.names || o.skip_names)
 	{
 		int	k = 0;
 
 		for (i = 0; i < g_ntests; i++)
 		{
-			const char	*p = o.names;
-			int			keep = 0;
+			int	keep = (!o.names || name_has(g_tests[i].name, o.names))
+				&& !(o.skip_names && name_has(g_tests[i].name, o.skip_names));
 
-			while (*p && !keep)
-			{
-				size_t	l = strcspn(p, ",");
-				char	w[256];
-
-				snprintf(w, sizeof(w), "%.*s", (int)(l < 255 ? l : 255), p);
-				keep = l && strstr(g_tests[i].name, w) != NULL;
-				p += l + (p[l] == ',');
-			}
 			if (keep)
 				g_tests[k++] = g_tests[i];
 		}
@@ -1296,7 +1320,12 @@ int	main(int ac, char **av)
 	if (g_san_dir && !*g_san_dir)
 		g_san_dir = NULL;
 	if (g_san_dir)
+	{
+		extern int	g_zm_off;
+
+		g_zm_off = 1;
 		san_map();
+	}
 	ti = 0;
 	part = 0;
 	for (i = 0; i < NFUNCS; i++)

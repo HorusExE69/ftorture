@@ -112,6 +112,7 @@ torture py01 ~/python-module-01 -c   # python-module-01 (Code Cultivation), chil
 | `-c`, `--chill` | downgrade style/hygiene check KOs (norminette, flake8/mypy, extra files, README, includes, Makefile hygiene) to warnings (▲) |
 | `--no-checks` | skip Makefile / norm / nm / prototype / Python AST checks |
 | `--no-norm` | skip norminette (C) or flake8 / mypy (Python) |
+| `--no-valgrind` | skip the valgrind (memcheck) pass |
 | `--no-sanitize` | skip the `-fsanitize=address,undefined` pass |
 | `--no-hidden` | ignore hidden files/folders in extra-file, include-use and norminette checks |
 | `--seed N` | fuzzing seed (default 42) |
@@ -455,6 +456,26 @@ every call. GNL is not measured without `-D BUFFER_SIZE`.
 The workloads and their `COST()` are in `src/*/b_*.c`; `ftorture.log` gives the
 perfect and real time of each function and every machine cost
 (`FTORTURE_BENCH_DEBUG=1` prints them live).
+
+## Valgrind (memcheck)
+
+Like at the evaluation, libft, ft_printf and get_next_line run again **under valgrind**
+(push_swap already did in its checks): your code rebuilt with `-g` (so there is a
+`file.c:line` even when your Makefile has no `-g`), the same tests, without ftorture's
+malloc tracker so valgrind sees every block. A **VALGRIND** section lists, as ✘, every
+error in your code:
+
+- `Invalid read` / `Invalid write` (one byte past a block, use after free…);
+- `Conditional jump or move depends on uninitialised value(s)`, `Use of uninitialised
+  value`, `Syscall param … uninitialised byte(s)`: where the value is used, and the
+  `malloc` that created it (`--track-origins`): a `ft_calloc` that is not zeroed, a string
+  without its `'\0'`, an array read before it is filled;
+- `Invalid free`, `Mismatched free`, `Source and destination overlap`.
+
+`NULL` dereferences and libc-matching crashes stay with the normal tests, and leaks with
+the tracker. get_next_line runs under valgrind with `BUFFER_SIZE` 1 and 42, without the
+Bible or the 100 000 lines (same code, minutes of memcheck). `--no-valgrind` skips this
+pass; without valgrind installed, the line is skipped.
 
 ## Sanitizers (`-fsanitize`)
 
