@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -53,7 +55,9 @@ static struct s_opt
 	int			eff_target;
 	const char	*names;			/* --name: only tests whose name has one item  */
 	const char	*skip_names;	/* --skip-name: not the tests that have one    */
-}	o = {0, 0, NULL, ".", 42, 3, 0, 0, 0, 50, NULL, NULL};
+	int			shard;			/* --shard K/N: only the functions i % N == K  */
+	int			shards;
+}	o = {0, 0, NULL, ".", 42, 3, 0, 0, 0, 50, NULL, NULL, 0, 1};
 
 #define L(fr, en) (o.english ? (en) : (fr))
 
@@ -402,7 +406,6 @@ static void	san_map(void)
 	char	path[4096];
 	FILE	*f;
 	int		i;
-	int		idx;
 
 	snprintf(path, sizeof(path), "%s/tests.tsv", g_san_dir);
 	f = fopen(path, "w");
@@ -410,13 +413,22 @@ static void	san_map(void)
 		return ;
 	/* seq, suite, speculative, position in its suite (the "index" of the
 	   test events: the -fsanitize pass reads the normal verdicts), name   */
-	for (i = 0, idx = 0; i < g_ntests; i++)
-	{
-		idx = i && !strcmp(g_tests[i].func, g_tests[i - 1].func) ? idx + 1 : 1;
+	for (i = 0; i < g_ntests; i++)
 		fprintf(f, "%d\t%s\t%d\t%d\t%s\n", g_tests[i].seq, g_tests[i].func,
-			g_tests[i].spec, idx, g_tests[i].name);
-	}
+			g_tests[i].spec, g_tests[i].pos, g_tests[i].name);
 	fclose(f);
+}
+
+/* The crashes of a test child are expected (NULL tests, crashes compared
+   with the libc): no core dump, and above all no crash reporter (apport,
+   systemd-coredump) started for each one. That reporter made most runs
+   wait: libft's normal pass went from 4.1 s to 1.0 s without it.        */
+static void	no_core_dump(void)
+{
+	struct rlimit	rl = {0, 0};
+
+	setrlimit(RLIMIT_CORE, &rl);
+	prctl(PR_SET_DUMPABLE, 0);
 }
 
 static void	run_child(const t_test *t, int ref, int fail_at, t_run *out)
@@ -446,6 +458,7 @@ static void	run_child(const t_test *t, int ref, int fail_at, t_run *out)
 				close(dn);
 		}
 		signal(SIGPIPE, SIG_IGN);
+		no_core_dump();
 		alarm((unsigned)o.timeout);
 		zsrand(o.seed);
 		g_ref = ref;
@@ -977,6 +990,7 @@ static t_bres	*run_bench(const t_bench *b, const char *label)
 				close(dn);
 		}
 		signal(SIGPIPE, SIG_IGN);
+		no_core_dump();
 		g_zm_active = 0;
 		g_fail_at = 0;
 		g_armed = 0;
@@ -1284,6 +1298,16 @@ int	main(int ac, char **av)
 			o.names = av[++i];
 		else if (!strcmp(a, "--skip-name") && i + 1 < ac)
 			o.skip_names = av[++i];
+		else if (!strcmp(a, "--shard") && i + 1 < ac)
+		{
+			/* the valgrind / sanitizer passes split by whole functions */
+			if (sscanf(av[++i], "%d/%d", &o.shard, &o.shards) != 2
+				|| o.shards < 1 || o.shard < 0 || o.shard >= o.shards)
+			{
+				o.shard = 0;
+				o.shards = 1;
+			}
+		}
 		else if (!strcmp(a, "-v") || !strcmp(a, "--verbose")
 			|| !strcmp(a, "--no-color") || !strcmp(a, "--no-banner")
 			|| !strcmp(a, "--json"))
@@ -1301,21 +1325,31 @@ int	main(int ac, char **av)
 			MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	if (g_shm == MAP_FAILED)
 		return (perror("mmap"), 2);
-	if (o.names || o.skip_names)
+	if (o.names)
 	{
 		int	k = 0;
 
 		for (i = 0; i < g_ntests; i++)
-		{
-			int	keep = (!o.names || name_has(g_tests[i].name, o.names))
-				&& !(o.skip_names && name_has(g_tests[i].name, o.skip_names));
-
-			if (keep)
+			if (name_has(g_tests[i].name, o.names))
 				g_tests[k++] = g_tests[i];
-		}
 		g_ntests = k;
 	}
 	qsort(g_tests, (size_t)g_ntests, sizeof(t_test), cmp_tests);
+	/* position of each test in its suite, as the normal pass numbers them,
+	   before --skip-name / --shard take tests out (valgrind, sanitizers) */
+	for (i = 0; i < g_ntests; i++)
+		g_tests[i].pos = i && !strcmp(g_tests[i].func, g_tests[i - 1].func)
+			? g_tests[i - 1].pos + 1 : 1;
+	if (o.skip_names || o.shards > 1)
+	{
+		int	k = 0;
+
+		for (i = 0; i < g_ntests; i++)
+			if (!(o.skip_names && name_has(g_tests[i].name, o.skip_names))
+				&& (o.shards < 2 || i % o.shards == o.shard))
+				g_tests[k++] = g_tests[i];
+		g_ntests = k;
+	}
 	g_san_dir = getenv("FTORTURE_SAN_DIR");
 	if (g_san_dir && !*g_san_dir)
 		g_san_dir = NULL;

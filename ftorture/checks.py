@@ -1,7 +1,11 @@
 """Native subject-check reports and compiler/tool probes."""
 from pathlib import Path
+import threading
 
 from .runtime import Context
+
+
+_SEQUENCE = threading.Lock()
 
 
 class CheckReport:
@@ -56,8 +60,9 @@ class CheckSession:
 
     def capture(self, args: list[str | Path], *, cwd: Path | None = None,
                 name: str = "probe") -> tuple[int, str]:
-        self.sequence += 1
-        log = self.directory / f"{self.sequence:03d}-{name}.log"
+        with _SEQUENCE:     # probes may run in threads (prototypes)
+            self.sequence += 1
+            log = self.directory / f"{self.sequence:03d}-{name}.log"
         status = self.ctx.command(args, log=log, cwd=cwd)
         return status, log.read_text(errors="replace")
 

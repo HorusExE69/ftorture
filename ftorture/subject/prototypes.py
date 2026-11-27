@@ -1,5 +1,6 @@
 """Check declarations with the compiler, not guessed C type equivalence."""
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from ..checks import CheckSession
 
@@ -38,9 +39,22 @@ def check_prototypes(session: CheckSession, header: str, subject: str, *, linked
                       "attendu : struct s_list { void *content; struct s_list *next; }")
     _, preprocessed = session.compiler(prefix + include, ("-E", "-P"), name="header-preprocessed")
     declarations = [re.sub(r"\s+", " ", value).strip() + ";" for value in preprocessed.split(";")]
-    for name, type_, shown in expected_prototypes(session):
+    expected = expected_prototypes(session)
+
+    def probe(entries) -> str:
+        return prefix + include + "".join(
+            f'_Static_assert(__builtin_types_compatible_p(__typeof__(&{name}), {type_}), "prototype {name}");\n'
+            for name, type_, _ in entries)
+    # One compile checks every prototype; only when it fails is each one
+    # compiled alone (in parallel) to know which ones are wrong.
+    status, _ = session.compiler(probe(expected), name="prototypes-all")
+    if status:
+        with ThreadPoolExecutor(8) as pool:
+            statuses = list(pool.map(lambda entry: session.compiler(probe([entry]), name=f"prototype-{entry[0]}")[0],
+                                     expected))
+    else:
+        statuses = [0] * len(expected)
+    for (name, _type, shown), bad in zip(expected, statuses):
         found = next((value for value in declarations if re.search(r"\b" + re.escape(name) + r"\s*\(", value)), "")
-        probe = prefix + include + f'_Static_assert(__builtin_types_compatible_p(__typeof__(&{name}), {type_}), "prototype");\n'
-        status, _ = session.compiler(probe, name=f"prototype-{name}")
-        session.report.prototype(name, "KO" if status else "OK", shown, found)
+        session.report.prototype(name, "KO" if bad else "OK", shown, found)
     session.report.end_prototypes()

@@ -457,6 +457,21 @@ The workloads and their `COST()` are in `src/*/b_*.c`; `ftorture.log` gives the
 perfect and real time of each function and every machine cost
 (`FTORTURE_BENCH_DEBUG=1` prints them live).
 
+## Speed
+
+On a 20-core machine, a full run (checks, tests, valgrind, sanitizers): libft **~9 s**
+(92 s before), ft_printf **~10 s** (24 s), get_next_line **~32 s** (126 s), with no test
+left out:
+
+- test children that crash on purpose (`NULL` tests, crashes compared with the libc) no
+  longer trigger a core dump or the system crash reporter (apport);
+- valgrind and the sanitizers run in parallel, split test by test; get_next_line's 18
+  `BUFFER_SIZE` passes are built and started at the same time, then displayed in the
+  usual order (with `-e` the normal passes stay one after the other so timings stay right);
+- prototypes are checked in a single compile (one per prototype only when it fails);
+- compilations are kept in `build/cache` and reused while the source, its headers, the
+  flags and the compiler do not change.
+
 ## Valgrind (memcheck)
 
 Like at the evaluation, libft, ft_printf and get_next_line run again **under valgrind**

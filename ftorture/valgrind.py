@@ -100,25 +100,36 @@ def collect(directory: Path, root: Path, results: dict | None = None) -> list[Fi
     return sorted(findings.values(), key=lambda f: (f.speculative, f.where))
 
 
+def execute(ctx: Context, executable: Path, args: list[str | Path], name: str,
+            skip: str = "") -> list[Path]:
+    """memcheck in parallel shards (thread-safe). `skip`: test names left out
+    (heavy tests that add nothing for memcheck)."""
+    from .sanitize import run_sharded
+
+    def command(shard: Path) -> list[str]:
+        return ["valgrind", "--tool=memcheck", "--error-limit=no", "--track-origins=yes",
+                "--leak-check=no", "--fullpath-after=", f"--log-file={shard}/vg.%p",
+                *(str(a) for a in (executable, *ctx.engine_args(), *args)), "--timeout", "120",
+                *(["--skip-name", skip] if skip else [])]
+
+    def env_for(shard: Path) -> dict[str, str]:
+        env = dict(ctx.env)
+        env["FTORTURE_SAN_DIR"] = str(shard)
+        return env
+    return run_sharded(ctx, ctx.build / "valgrind" / name, command, env_for, 3600)
+
+
+def gather(ctx: Context, dirs: list[Path]) -> list[Finding]:
+    from .sanitize import merge
+    findings: list[Finding] = []
+    for shard in dirs:
+        merge(findings, collect(shard, ctx.options.directory, getattr(ctx.renderer, "results", None)))
+    return sorted(findings, key=lambda f: (f.speculative, f.where))
+
+
 def run(ctx: Context, executable: Path, args: list[str | Path], name: str,
         skip: str = "") -> list[Finding]:
-    """`skip`: test names left out (heavy tests that add nothing for memcheck)."""
-    directory = ctx.build / "valgrind" / name
-    shutil.rmtree(directory, ignore_errors=True)
-    directory.mkdir(parents=True)
-    env = dict(ctx.env)
-    env["FTORTURE_SAN_DIR"] = str(directory)
-    command = ["valgrind", "--tool=memcheck", "--error-limit=no", "--track-origins=yes",
-               "--leak-check=no", "--fullpath-after=", f"--log-file={directory}/vg.%p",
-               *(str(a) for a in (executable, *ctx.engine_args(), *args)), "--timeout", "120",
-               *(["--skip-name", skip] if skip else [])]
-    with open(directory / "output.log", "w") as log:
-        try:
-            subprocess.run(command, cwd=ctx.build, env=env, stdout=log, stderr=subprocess.STDOUT,
-                           timeout=3600, check=False, start_new_session=True)
-        except subprocess.TimeoutExpired:
-            pass
-    return collect(directory, ctx.options.directory, getattr(ctx.renderer, "results", None))
+    return gather(ctx, execute(ctx, executable, args, name, skip))
 
 
 def records(ctx: Context, findings: list[Finding], *, label: str = "", skipped: str = "") -> Path:

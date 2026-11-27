@@ -45,15 +45,16 @@ def environment(ctx: Context, directory: Path) -> dict[str, str]:
 def compile_objects(ctx: Context, sources: list[Path], out: Path, *, defines: list[str] = (),
                     includes: list[Path] = (), flags: tuple[str, ...] = SAN_FLAGS) -> tuple[list[Path], str]:
     """Each source compiled with the sanitizers (or `flags`). Returns (objects, error log)."""
+    from concurrent.futures import ThreadPoolExecutor
     out.mkdir(parents=True, exist_ok=True)
-    objects = []
-    for index, source in enumerate(sources):
-        obj = out / f"{index:03d}-{source.stem}.o"
-        log = out / f"{index:03d}-{source.stem}.log"
-        if ctx.command([*ctx.cc, *flags, "-w", *defines, *(f"-I{d}" for d in includes),
-                        "-c", source, "-o", obj], log=log):
+    options = [*flags, "-w", *defines, *(f"-I{d}" for d in includes)]
+    logs = [out / f"{index:03d}-{source.stem}.log" for index, source in enumerate(sources)]
+    # cached (build/cache) and in parallel: unchanged sources are not rebuilt
+    with ThreadPoolExecutor(8) as pool:
+        objects = list(pool.map(lambda pair: ctx.cached_object(pair[0], options, pair[1]), zip(sources, logs)))
+    for obj, log in zip(objects, logs):
+        if obj is None:
             return [], log.read_text(errors="replace")
-        objects.append(obj)
     return objects, ""
 
 
@@ -173,25 +174,60 @@ def merge(into: list[Finding], items: list[Finding], prefix: str = "") -> None:
         same.compensated = same.overflow and same._normal_seen and same._normal_ok
 
 
-def run(ctx: Context, executable: Path, args: list[str | Path], name: str) -> list[Finding]:
-    """Run the sanitized tester silently; returns the findings, judged with the
-    normal pass's verdicts (already in ctx.renderer.results)."""
-    directory = ctx.build / "sanitize" / name
+def workers() -> int:
+    """Parallel shards for the slow passes (valgrind, sanitizers)."""
+    return max(1, min(os.cpu_count() or 1, 8))
+
+
+def run_sharded(ctx: Context, directory: Path, command, env_for, timeout: int) -> list[Path]:
+    """Run `command(shard_dir)` once per shard (--shard K/N: whole functions
+    split between N processes), all at the same time. Returns the shard dirs."""
     shutil.rmtree(directory, ignore_errors=True)
-    directory.mkdir(parents=True)
-    command = [str(a) for a in (executable, *ctx.engine_args(), *args)]
-    with open(directory / "output.log", "w") as log:
+    total = workers()
+    dirs, procs = [], []
+    for k in range(total):
+        shard = directory / f"s{k}"
+        shard.mkdir(parents=True)
+        log = open(shard / "output.log", "w")
+        process = subprocess.Popen([*command(shard), "--shard", f"{k}/{total}"], cwd=ctx.build,
+                                   env=env_for(shard), stdout=log, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+        ctx.track(process)
+        procs.append((process, log))
+        dirs.append(shard)
+    for proc, log in procs:
         try:
-            subprocess.run(command, cwd=ctx.build, env=environment(ctx, directory), stdout=log,
-                           stderr=subprocess.STDOUT, timeout=1800, check=False, start_new_session=True)
+            proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            pass
+            proc.kill()
+            proc.wait()
+        log.close()
+    return dirs
+
+
+def execute(ctx: Context, executable: Path, args: list[str | Path], name: str) -> list[Path]:
+    """Run the sanitized tester silently, in parallel shards (thread-safe)."""
+    return run_sharded(ctx, ctx.build / "sanitize" / name,
+                       lambda shard: [str(a) for a in (executable, *ctx.engine_args(), *args)],
+                       lambda shard: environment(ctx, shard), 1800)
+
+
+def gather(ctx: Context, dirs: list[Path]) -> list[Finding]:
+    """Findings of an executed run, judged with the normal pass's verdicts
+    (ctx.renderer.results): call it once the normal pass is displayed."""
     results = getattr(ctx.renderer, "results", {})
 
     def passed(suite: str, index: int) -> bool | None:
         res = results.get((suite, index))
         return None if res is None else res in (0, 1)
-    return collect(directory, ctx.options.directory, passed)
+    findings: list[Finding] = []
+    for shard in dirs:
+        merge(findings, collect(shard, ctx.options.directory, passed))
+    return sorted(findings, key=lambda f: (f.compensated, f.speculative, f.where))
+
+
+def run(ctx: Context, executable: Path, args: list[str | Path], name: str) -> list[Finding]:
+    return gather(ctx, execute(ctx, executable, args, name))
 
 
 def write(ctx: Context, findings: list[Finding], *, skipped: str = "", label: str = "",

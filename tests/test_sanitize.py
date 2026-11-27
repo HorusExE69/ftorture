@@ -107,3 +107,23 @@ class SanitizerRunTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompileCacheTests(unittest.TestCase):
+    def test_object_reused_until_source_or_header_changes(self):
+        from ftorture.runtime import Context, Options
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src/a.h").write_text("#define V 1\n")
+            (root / "src/a.c").write_text('#include "a.h"\nint v(void) { return V; }\n')
+            ctx = Context(root, "x", Options(root))
+            ctx.build.mkdir(parents=True)
+            first = ctx.cached_object(root / "src/a.c", ["-O0"], ctx.build / "a.log")
+            self.assertIsNotNone(first)
+            self.assertEqual(ctx.cached_object(root / "src/a.c", ["-O0"], ctx.build / "a.log"), first)
+            self.assertNotEqual(ctx.cached_object(root / "src/a.c", ["-O1"], ctx.build / "a.log"), first)
+            (root / "src/a.h").write_text("#define V 2\n")
+            self.assertNotEqual(ctx.cached_object(root / "src/a.c", ["-O0"], ctx.build / "a.log"), first)
+            (root / "src/a.c").write_text("this does not compile\n")
+            self.assertIsNone(ctx.cached_object(root / "src/a.c", ["-O0"], ctx.build / "a.log"))

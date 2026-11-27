@@ -1,4 +1,5 @@
 """Source-only strategy: one isolated binary per BUFFER_SIZE and part."""
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import gzip
 import re
@@ -129,8 +130,6 @@ class GnlProject(Project):
         bible = self.bible(ctx)
         files, largest = self.files(ctx)
         san_ok = ctx.options.sanitize and sanitize.available(ctx)
-        san_findings: list = []
-        vg_findings: list = []
         vg_ok = ctx.options.valgrind and valgrind.available()
         # memcheck is ~20x slower: BUFFER_SIZE 1 and 42 (or the first selected) per part
         vg_sizes = {part: ({"1", "42"} & {size for p, size, _ in passes if p == part})
@@ -141,47 +140,44 @@ class GnlProject(Project):
         for source in ("engine", "memtrack"):
             ctx.require([*ctx.cc, *flags, "-c", ctx.root / "src" / f"{source}.c",
                          "-o", ctx.build / f"{source}.o"], ctx.build / f"{source}.log")
-        last = None
-        previous_part = None
-        failed = False
-        for part, size, key in passes:
+
+        def build(item: tuple[int, str, str]) -> dict:
+            """One BUFFER_SIZE: your two files, the tester, its -fsanitize twin."""
+            part, size, key = item
             out = ctx.build / key
             out.mkdir(exist_ok=True)
             suffix = "_bonus" if part == 2 else ""
-            objects = []
             definitions = [] if size == "def" else ["-D", f"BUFFER_SIZE={size}"]
             slot = ["-D", f"Z_SLOT={key.rsplit('c', 1)[1]}", "-D", f'Z_LABEL="BUFFER_SIZE={size}"'] \
                 if "bsc" in key else []
-            compiled = True
+            job = {"part": part, "size": size, "key": key, "out": out, "error": None, "exe": None, "san": None,
+                   "label": f"BUFFER_SIZE={size}" + (" (bonus)" if part == 2 else "")}
+            objects = []
             for name in (f"get_next_line{suffix}", f"get_next_line_utils{suffix}"):
-                obj = out / f"{name}.o"
-                # -g: valgrind and the replays show your file:line
-                if not ctx.compile(["-Wall", "-Wextra", "-Werror", "-g", *definitions,
-                                    f"-I{ctx.options.directory}", "-c",
-                                    ctx.options.directory / f"{name}.c", "-o", obj],
-                                   out / f"{name}.log"):
-                    compiled = False
-                    break
+                # -g: valgrind and the replays show your file:line (cached in build/cache)
+                obj = ctx.cached_object(ctx.options.directory / f"{name}.c",
+                                        ["-Wall", "-Wextra", "-Werror", "-g", *definitions,
+                                         f"-I{ctx.options.directory}"], out / f"{name}.log")
+                if obj is None:
+                    job["error"] = "compile"
+                    return job
                 objects.append(obj)
-            if not compiled:
-                accepted = size == "0" and not ctx.options.speculative
-                failed |= not accepted
-                print(f"{'▲' if accepted else '✘'} BUFFER_SIZE={size}: " + ctx.message(
-                    "compilation failed; see", "échec de compilation ; voir") + f" {out}", flush=True)
-                continue
             tests = [ctx.root / "src/gnl" / name for name in ("gnl.c", "proj.c", "t_gnl.c", "b_gnl.c",
                                                               "t_gnl_custom.c")]
             if part == 2:
                 tests.append(ctx.root / "src/gnl/t_gnl_bonus.c")
-            executable = out / "tester"
-            if not ctx.compile([*flags, "-D", f"Z_BS={-1 if size == 'def' else size}",
-                         "-D", f"GNL_SUITE={key}", *slot, *bible, ctx.build / "engine.o", ctx.build / "memtrack.o",
-                         *tests, *objects, "-Wl,--wrap=malloc", "-Wl,--wrap=free", "-Wl,--wrap=read",
-                         "-lm", "-o", executable], out / "link.log"):
-                failed = True
-                print(f"✘ BUFFER_SIZE={size}: " + ctx.message(
-                    "cannot link tester; see", "impossible de lier le tester ; voir") + f" {out / 'link.log'}", flush=True)
-                continue
+            defines = [*flags, "-D", f"Z_BS={-1 if size == 'def' else size}", "-D", f"GNL_SUITE={key}",
+                       *slot, *bible]
+            test_objects = [ctx.cached_object(test, defines, out / f"{test.stem}.log") for test in tests]
+            if None in test_objects:
+                job["error"] = "link"
+                return job
+            common = [ctx.build / "engine.o", ctx.build / "memtrack.o", *test_objects]
+            wraps = ["-Wl,--wrap=malloc", "-Wl,--wrap=free", "-Wl,--wrap=read"]
+            if not ctx.compile([*common, *objects, *wraps, "-lm", "-o", out / "tester"], out / "link.log"):
+                job["error"] = "link"
+                return job
+            job["exe"] = out / "tester"
             args = ["-f", key]
             if ctx.options.timeout is None:
                 args.extend(["--timeout", str(self.timeout(size, largest))])
@@ -190,34 +186,79 @@ class GnlProject(Project):
                 args.extend(["--name", "ton fichier :,fichier généré :"])
             if size == "0" or (size != "def" and int(size) >= 10000000):
                 args.append("--spec-pass")
-            result = ctx.stream_tester(executable, args, checks=last is None, function_filter=False)
-            if result > 1:
-                return result
-            last = executable
-            previous_part = part
-            if vg_ok and size in vg_sizes.get(part, ()):
-                label = f"BUFFER_SIZE={size}" + (" (bonus)" if part == 2 else "")
-                # the Bible and the 100 000 / 300 000 lines take minutes under
-                # memcheck and use the same code as the shorter lines
-                sanitize.merge(vg_findings, valgrind.run(
-                    ctx, executable, args, key, skip="Bible,100 000,lit le minimum,gros fichier,5 000 lignes"),
-                    f"{label} · ")
-            # -fsanitize: same tests with the sources rebuilt under ASan + UBSan
-            # (not 0 and 10M+: no line read / a buffer that big on the stack)
+            job["args"] = args
+            # -fsanitize (not 0 and 10M+: no line read / a buffer that big on the stack)
             if san_ok and size != "0" and (size == "def" or int(size) < 10000000):
                 built, _ = sanitize.compile_objects(
                     ctx, [ctx.options.directory / f"{name}{suffix}.c" for name in
                           ("get_next_line", "get_next_line_utils")], out / "san",
                     defines=definitions, includes=[ctx.options.directory])
-                san_exe = out / "tester-san"
-                if built and ctx.compile([*flags, "-D", f"Z_BS={-1 if size == 'def' else size}",
-                                          "-D", f"GNL_SUITE={key}", *slot, *bible, ctx.build / "engine.o",
-                                          ctx.build / "memtrack.o", *tests, *built, "-Wl,--wrap=malloc",
-                                          "-Wl,--wrap=free", "-Wl,--wrap=read", *sanitize.LINK_FLAGS,
-                                          "-lm", "-o", san_exe], out / "san-link.log"):
-                    label = f"BUFFER_SIZE={size}" + (" (bonus)" if part == 2 else "")
-                    sanitize.merge(san_findings, sanitize.run(ctx, san_exe, args, key), f"{label} · ")
-        if last is None:
+                if built and ctx.compile([*common, *built, *wraps, *sanitize.LINK_FLAGS, "-lm",
+                                          "-o", out / "tester-san"], out / "san-link.log"):
+                    job["san"] = out / "tester-san"
+            return job
+
+        # Every BUFFER_SIZE is independent: build them all at once, then run
+        # the normal passes, the sanitizers and valgrind at the same time; the
+        # normal passes are displayed in their usual order as they finish.
+        try:
+            with ThreadPoolExecutor(sanitize.workers()) as pool:
+                jobs = list(pool.map(build, passes))
+            # -e times the code: then nothing else may run at the same time
+            timed = ctx.options.efficiency
+            with ThreadPoolExecutor(1 if timed else sanitize.workers()) as runs, ThreadPoolExecutor(3) as slow:
+                normal = {job["key"]: runs.submit(ctx.capture_tester, job["exe"], job["args"],
+                                                  function_filter=False)
+                          for job in jobs if job["exe"]}
+                late = []
+                if timed:
+                    for future in normal.values():
+                        future.result()
+                for job in jobs:
+                    if not job["exe"]:
+                        continue
+                    if vg_ok and job["size"] in vg_sizes.get(job["part"], ()):
+                        # the Bible and the 100 000 / 300 000 lines take minutes under
+                        # memcheck and use the same code as the shorter lines
+                        late.append(("vg", job, slow.submit(
+                            valgrind.execute, ctx, job["exe"], job["args"], job["key"],
+                            "Bible,100 000,lit le minimum,gros fichier,5 000 lignes")))
+                    if job["san"]:
+                        late.append(("san", job, slow.submit(sanitize.execute, ctx, job["san"], job["args"],
+                                                             job["key"])))
+                shown = False
+                failed = False
+                for job in jobs:
+                    if job["error"]:
+                        size = job["size"]
+                        if job["error"] == "compile":
+                            accepted = size == "0" and not ctx.options.speculative
+                            failed |= not accepted
+                            print(f"{'▲' if accepted else '✘'} BUFFER_SIZE={size}: " + ctx.message(
+                                "compilation failed; see", "échec de compilation ; voir") + f" {job['out']}",
+                                flush=True)
+                        else:
+                            failed = True
+                            print(f"✘ BUFFER_SIZE={size}: " + ctx.message(
+                                "cannot link tester; see", "impossible de lier le tester ; voir")
+                                + f" {job['out'] / 'link.log'}", flush=True)
+                        continue
+                    status, lines = normal[job["key"]].result()
+                    ctx.replay_tester(lines, checks=not shown)
+                    shown = True
+                    if status > 1:
+                        return status
+                vg_findings: list = []
+                san_findings: list = []
+                for kind, job, future in late:
+                    if kind == "vg":
+                        sanitize.merge(vg_findings, valgrind.gather(ctx, future.result()), f"{job['label']} · ")
+                    else:
+                        sanitize.merge(san_findings, sanitize.gather(ctx, future.result()), f"{job['label']} · ")
+        except KeyboardInterrupt:
+            ctx.kill_children()
+            raise
+        if not shown:
             if ctx.options.checks:
                 ctx.renderer.render_checks(ctx.checks_file)
             return ctx.renderer.finish(extra_failed=True)

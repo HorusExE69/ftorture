@@ -48,8 +48,19 @@ class ArchiveProject(Project):
                           if len(columns := line.split()) >= 3
                           and columns[-2] == "T" and columns[-1].startswith(self.symbol_prefix)})
         executable = ctx.build / name
-        args = [*ctx.cc, *ctx.engine_flags(self.source_dir), ctx.root / "src/engine.c",
-                ctx.root / "src/memtrack.c", *sorted((ctx.root / "src" / self.source_dir).glob("*.c")),
+        # the tester's own sources: compiled once (build/cache), in parallel
+        from concurrent.futures import ThreadPoolExecutor
+        sources = [ctx.root / "src/engine.c", ctx.root / "src/memtrack.c",
+                   *sorted((ctx.root / "src" / self.source_dir).glob("*.c"))]
+        logs = ctx.build / "objects"
+        logs.mkdir(exist_ok=True)
+        with ThreadPoolExecutor(8) as pool:
+            objects = list(pool.map(lambda source: ctx.cached_object(
+                source, ctx.engine_flags(self.source_dir), logs / f"{source.stem}.log"), sources))
+        if None in objects:
+            bad = sources[objects.index(None)]
+            raise RunnerError(ctx.message("Command failed; see", "Échec ; voir") + f" {logs / (bad.stem + '.log')}")
+        args = [*ctx.cc, *objects,
                 "-Wl,--wrap=malloc", "-Wl,--wrap=free",
                 *(f"-Wl,-u,{symbol}" for symbol in symbols), archive, *self.extra_archives(ctx),
                 *flags, "-lm", "-o", executable]

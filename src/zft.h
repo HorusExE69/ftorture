@@ -43,6 +43,8 @@ typedef struct s_test
 	int			idx;	/* __COUNTER__ of the TEST in its file: lets
 						   `torture ... --repro file#idx` rebuild it alone.
 						   -1 for tests registered at run time.          */
+	int			pos;	/* position in its suite, among the selected tests
+						   (the "index" of its test event)                  */
 }	t_test;
 
 void	zft_register(const char *func, const char *name, t_kind kind, int spec,
