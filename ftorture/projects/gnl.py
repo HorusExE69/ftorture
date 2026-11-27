@@ -4,6 +4,7 @@ import gzip
 import re
 
 from .base import Project
+from .. import sanitize
 from ..subject.gnl import gnl_checks
 from ..runtime import Context, RunnerError
 
@@ -127,6 +128,8 @@ class GnlProject(Project):
         flags = ctx.engine_flags("gnl")
         bible = self.bible(ctx)
         files, largest = self.files(ctx)
+        san_ok = ctx.options.sanitize and sanitize.available(ctx)
+        san_findings: list = []
         if files:
             ctx.env["FTORTURE_GNL_FILES"] = files
         for source in ("engine", "memtrack"):
@@ -185,10 +188,37 @@ class GnlProject(Project):
                 return result
             last = executable
             previous_part = part
+            # -fsanitize: same tests with the sources rebuilt under ASan + UBSan
+            # (not 0 and 10M+: no line read / a buffer that big on the stack)
+            if san_ok and size != "0" and (size == "def" or int(size) < 10000000):
+                built, _ = sanitize.compile_objects(
+                    ctx, [ctx.options.directory / f"{name}{suffix}.c" for name in
+                          ("get_next_line", "get_next_line_utils")], out / "san",
+                    defines=definitions, includes=[ctx.options.directory])
+                san_exe = out / "tester-san"
+                if built and ctx.compile([*flags, "-D", f"Z_BS={-1 if size == 'def' else size}",
+                                          "-D", f"GNL_SUITE={key}", *slot, *bible, ctx.build / "engine.o",
+                                          ctx.build / "memtrack.o", *tests, *built, "-Wl,--wrap=malloc",
+                                          "-Wl,--wrap=free", "-Wl,--wrap=read", *sanitize.LINK_FLAGS,
+                                          "-lm", "-o", san_exe], out / "san-link.log"):
+                    label = f"BUFFER_SIZE={size}" + (" (bonus)" if part == 2 else "")
+                    for item in sanitize.run(ctx, san_exe, args, key):
+                        merged = next((m for m in san_findings if (m.kind, m.where) == (item.kind, item.where)), None)
+                        tests_ = [f"{label} · {name.split(' · ', 1)[-1]}" for name in item.tests]
+                        if merged:
+                            merged.tests += tests_
+                            merged.speculative &= item.speculative
+                        else:
+                            item.tests = tests_
+                            san_findings.append(item)
         if last is None:
             if ctx.options.checks:
                 ctx.renderer.render_checks(ctx.checks_file)
             return ctx.renderer.finish(extra_failed=True)
+        if ctx.options.sanitize:
+            ctx.renderer.render_records(sanitize.write(ctx, san_findings, skipped="" if san_ok else ctx.message(
+                "this compiler cannot link -fsanitize=address,undefined",
+                "ce compilateur ne sait pas lier -fsanitize=address,undefined")))
         if not bonus and ctx.options.part != 1:
             ctx.renderer.add_note(ctx.message("Bonus not tested: bonus files missing.",
                                               "Bonus non testé : fichiers bonus absents."))

@@ -89,6 +89,10 @@ live in `tests/test_custom_tests.py` and custom-menu PTY coverage in `tests/test
 - An efficiency that is not a time uses `SCORE(key) { … SCORE_SET(ideal, real); }`: it runs once in a child (no calibration, 120 s limit), `pct = ideal / real`, and the log line prints "reference / yours" instead of µs. push_swap uses it with the subject's "excellent" thresholds as `ideal` and the average operation count as `real`; the machine-cost line is only shown when a timed benchmark ran.
 - The student side is calibrated to ~15 ms of repetitions in its own process, best time per repetition of 3 runs, killed after 2 s (shown as `<N%`). Check a new workload with `FTORTURE_BENCH_DEBUG=1`: a clean implementation should land near 100% (not far above: that means the `COST()` overcounts), a slow-on-purpose fixture low, and reruns within a few %.
 
+## Sanitizer pass
+
+`ftorture/sanitize.py` rebuilds the student's sources (from `make -nB <rule>` via `compiled_sources`, includes from `header_dirs`) with `SAN_FLAGS`, links the same tester with `LINK_FLAGS`, and runs it with `FTORTURE_SAN_DIR`: the engine then keeps memtrack off, writes `tests.tsv`, and gives each test child its own report path (`__sanitizer_set_report_path`); `alloc_size()` falls back to ASan's allocator. `collect()` keeps reports whose frame is in the student folder, groups them by kind and location, and `write()` turns them into check records rendered by `Renderer.render_records` before the summary (archive projects: `ctx.tester(..., after=...)`; GNL aggregates every BUFFER_SIZE; push_swap runs its binaries directly in `push_swap_pass`). A new C project should call the same helpers; do not count the pass's test verdicts.
+
 ## Memory tracker limits
 
 `memtrack.c` gives every malloc its own guarded mapping in a 131 072-entry table; past 3/4 full it falls back to the real malloc, and after 20 000 frees it `munmap`s blocks (state 3) whose address range the libc may reuse. Tests that make hundreds of thousands of allocations (GNL with `BUFFER_SIZE=1`) exercise this path: keep `is_mapped` checks on state-3 entries, or "free in the middle of a block" / "double free" false positives come back.

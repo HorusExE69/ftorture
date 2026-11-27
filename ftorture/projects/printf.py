@@ -29,6 +29,10 @@ class PrintfProject(ArchiveProject):
             if result > 1:
                 return result
             first = False
+            records = self.sanitized(ctx, rule, ["-p", str(part)],
+                                     ctx.message("mandatory", "obligatoire") if part == 1 else "bonus")
+            if records:
+                ctx.renderer.render_records(records)
         if not bonus and ctx.options.part != 1:
             ctx.renderer.add_note(ctx.message("Bonus not tested: no bonus rule.",
                                               "Bonus non testé : pas de règle bonus."))

@@ -230,10 +230,17 @@ void	real_free(void *p)
 	__real_free(p);
 }
 
+/* -fsanitize pass: memtrack is off, ASan's allocator knows the blocks */
+int		__sanitizer_get_ownership(const volatile void *p) __attribute__((weak));
+size_t	__sanitizer_get_allocated_size(const volatile void *p) __attribute__((weak));
+
 size_t	alloc_size(const void *p)
 {
 	t_blk	*b = lookup((uintptr_t)p, 0);
 
+	if ((!b || b->state != 1) && p && __sanitizer_get_ownership
+		&& __sanitizer_get_ownership(p))
+		return (__sanitizer_get_allocated_size(p));
 	if (!b || b->state != 1)
 		return ((size_t)-1);
 	return (b->size);

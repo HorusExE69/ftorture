@@ -373,6 +373,29 @@ typedef struct s_run
 	t_shm	s;
 }	t_run;
 
+/* -fsanitize pass (FTORTURE_SAN_DIR): the student code is built with ASan
+   and UBSan, memtrack stays off so ASan sees the real heap, and every test
+   child writes its reports to <dir>/t<seq>.<pid> (tests.tsv maps seq to
+   the test). Verdicts of this pass are not used, only the reports.      */
+void	__sanitizer_set_report_path(const char *path) __attribute__((weak));
+static const char	*g_san_dir;
+
+static void	san_map(void)
+{
+	char	path[4096];
+	FILE	*f;
+	int		i;
+
+	snprintf(path, sizeof(path), "%s/tests.tsv", g_san_dir);
+	f = fopen(path, "w");
+	if (!f)
+		return ;
+	for (i = 0; i < g_ntests; i++)
+		fprintf(f, "%d\t%s\t%d\t%s\n", g_tests[i].seq, g_tests[i].func,
+			g_tests[i].spec, g_tests[i].name);
+	fclose(f);
+}
+
 static void	run_child(const t_test *t, int ref, int fail_at, t_run *out)
 {
 	pid_t	pid;
@@ -406,7 +429,15 @@ static void	run_child(const t_test *t, int ref, int fail_at, t_run *out)
 		g_fail_at = fail_at;
 		g_armed = 0;
 		zm_reset();
-		g_zm_active = !ref;
+		g_zm_active = !ref && !g_san_dir;
+		if (g_san_dir && __sanitizer_set_report_path)
+		{
+			static char	rp[4096];
+
+			snprintf(rp, sizeof(rp), "%s/%c%d", g_san_dir, ref ? 'r' : 't',
+				t->seq);
+			__sanitizer_set_report_path(rp);
+		}
 		t->fn();
 		g_zm_active = 0;
 		g_shm->leaks = zm_live_blocks();
@@ -1255,6 +1286,11 @@ int	main(int ac, char **av)
 		g_ntests = k;
 	}
 	qsort(g_tests, (size_t)g_ntests, sizeof(t_test), cmp_tests);
+	g_san_dir = getenv("FTORTURE_SAN_DIR");
+	if (g_san_dir && !*g_san_dir)
+		g_san_dir = NULL;
+	if (g_san_dir)
+		san_map();
 	ti = 0;
 	part = 0;
 	for (i = 0; i < NFUNCS; i++)

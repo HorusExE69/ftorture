@@ -531,4 +531,8 @@ def run_push_swap_suites(ctx: Context, *, bonus: bool, checker: Path | None,
 
     if note:
         renderer.add_note(note)
+    from ..sanitize import push_swap_pass
+    records = push_swap_pass(ctx, bonus=bonus)
+    if records:
+        renderer.render_records(records)
     return renderer.finish(item_en="suites", item_fr="suites")

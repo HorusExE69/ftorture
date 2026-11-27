@@ -111,6 +111,7 @@ torture py01 ~/python-module-01 -c   # python-module-01 (Code Cultivation), mode
 | `-c`, `--chill` | passe les vérifications style/hygiène KO (norminette, flake8/mypy, fichiers en trop, README, includes, hygiène Makefile) en avertissements (▲) |
 | `--no-checks` | saute Makefile / norme / nm / prototypes / vérifs AST Python |
 | `--no-norm` | saute norminette (C) ou flake8 / mypy (Python) |
+| `--no-sanitize` | saute la passe `-fsanitize=address,undefined` |
 | `--no-hidden` | ignore les fichiers/dossiers cachés dans les vérifications des fichiers, includes et norminette |
 | `--seed N` | graine du fuzzing (42 par défaut) |
 | `--timeout S` | timeout par test (3 s par défaut, 10 s pour gnl, 20 s pour push_swap) |
@@ -451,6 +452,28 @@ mesure de GNL sans `-D BUFFER_SIZE`.
 Les charges de travail et leur `COST()` sont dans `src/*/b_*.c` ; `ftorture.log` donne
 le temps parfait et le vrai temps de chaque fonction et tous les coûts de la machine
 (`FTORTURE_BENCH_DEBUG=1` les affiche en direct).
+
+## Sanitizers (`-fsanitize`)
+
+Après les tests, libft, ft_printf, get_next_line et push_swap repassent avec **ton code
+recompilé en `-fsanitize=address,undefined`** (AddressSanitizer + UndefinedBehaviorSanitizer),
+sans le traqueur de malloc de ftorture pour qu'ASan voie le vrai tas. Les mêmes tests
+tournent en silence (pour push_swap : chaque stratégie de 3 à 500 nombres, `INT_MIN` /
+`INT_MAX`, les erreurs, `--bench`, le checker) ; seuls les rapports comptent, dans une
+section **SANITIZERS** avant le résultat :
+
+- **dépassement d'entier signé**, l'« annulation d'overflow » classique : `-n` sur
+  `INT_MIN` dans `ft_itoa`, `res * 10 + d` qui dépasse en lisant `-2147483648` dans
+  `ft_atoi`, `ft_putnbr`…
+- accès **hors limites** sur la pile, les globales et le tas (même d'un octet, même sans
+  crash), use after free, double free ;
+- décalages invalides (`1 << 32`), division par zéro, valeurs invalides.
+
+Chaque problème donne `fichier.c:ligne`, la fonction et le premier test qui l'a
+déclenché ; ✘ en général, ▲ s'il n'arrive que dans des tests spéculatifs (entrées
+indéfinies). Les déréférencements de `NULL` restent l'affaire des tests normaux (comparés
+au crash de la libc). `--no-sanitize` saute cette passe ; si le compilateur n'a pas les
+runtimes ASan/UBSan, la ligne est sautée.
 
 ## Légende
 

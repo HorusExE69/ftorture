@@ -33,6 +33,7 @@ class Options:
     timeout: int | None = None
     no_color: bool = False
     ignore_hidden: bool = False
+    sanitize: bool = True           # -fsanitize=address,undefined pass (--no-sanitize)
     files: tuple[str, ...] = ()     # gnl --file: paths or sizes (normalized by the project)
     checker: str | None = None      # push_swap --checker: the official checker_linux
     repro: str | None = None        # --repro FILE#IDX[mK][@SUITE[=BS]]: rebuild one test alone
@@ -216,10 +217,15 @@ class Context:
     def tester(self, executable: Path, extra: list[str | Path], *,
                checks: bool = False, function_filter: bool = True,
                note: str | None = None, item_en: str = "functions",
-               item_fr: str = "fonctions") -> int:
+               item_fr: str = "fonctions", after=None) -> int:
         status = self.stream_tester(executable, extra, checks=checks, function_filter=function_filter)
         if status > 1:
             return status
+        if after is not None:
+            # e.g. the -fsanitize pass: its section comes before the summary
+            records = after()
+            if records:
+                self.renderer.render_records(records)
         if note:
             self.renderer.add_note(note)
         return self.renderer.finish(item_en=item_en, item_fr=item_fr)

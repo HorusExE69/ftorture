@@ -92,6 +92,12 @@ class Renderer:
         if self.checks_rendered or not self.options.checks or not checks_file.is_file():
             return
         self.checks_rendered = True
+        self.render_records(checks_file)
+
+    def render_records(self, checks_file: Path) -> None:
+        """A report in the checks format (S/C/D/P records), counted like the checks."""
+        if not checks_file.is_file():
+            return
         term = self.terminal
         amber, grey = self._amber(), self._grey()
         proto_buf: list[str] = []

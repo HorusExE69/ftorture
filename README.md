@@ -112,6 +112,7 @@ torture py01 ~/python-module-01 -c   # python-module-01 (Code Cultivation), chil
 | `-c`, `--chill` | downgrade style/hygiene check KOs (norminette, flake8/mypy, extra files, README, includes, Makefile hygiene) to warnings (▲) |
 | `--no-checks` | skip Makefile / norm / nm / prototype / Python AST checks |
 | `--no-norm` | skip norminette (C) or flake8 / mypy (Python) |
+| `--no-sanitize` | skip the `-fsanitize=address,undefined` pass |
 | `--no-hidden` | ignore hidden files/folders in extra-file, include-use and norminette checks |
 | `--seed N` | fuzzing seed (default 42) |
 | `--timeout S` | per-test timeout (default 3 s, 10 s for gnl, 20 s for push_swap) |
@@ -454,6 +455,27 @@ every call. GNL is not measured without `-D BUFFER_SIZE`.
 The workloads and their `COST()` are in `src/*/b_*.c`; `ftorture.log` gives the
 perfect and real time of each function and every machine cost
 (`FTORTURE_BENCH_DEBUG=1` prints them live).
+
+## Sanitizers (`-fsanitize`)
+
+After the tests, libft, ft_printf, get_next_line and push_swap run again with **your code
+rebuilt with `-fsanitize=address,undefined`** (AddressSanitizer + UndefinedBehaviorSanitizer),
+without ftorture's malloc tracker so ASan sees the real heap. The same tests run silently
+(for push_swap: each strategy from 3 to 500 numbers, `INT_MIN` / `INT_MAX`, errors,
+`--bench`, the checker); only the reports count, in a **SANITIZERS** section before the
+result:
+
+- **signed integer overflow**, the classic "negation overflow": `-n` on `INT_MIN` in
+  `ft_itoa`, `res * 10 + d` overflowing while reading `-2147483648` in `ft_atoi`,
+  `ft_putnbr`…
+- **out-of-bounds** accesses on the stack, globals and heap (even one byte, even without a
+  crash), use after free, double free;
+- invalid shifts (`1 << 32`), division by zero, invalid values.
+
+Each problem gives `file.c:line`, the function and the first test that triggered it; ✘
+in general, ▲ when it only happens in speculative tests (undefined inputs). `NULL`
+dereferences stay with the normal tests (compared with the libc's crash). `--no-sanitize`
+skips this pass; without the ASan/UBSan runtimes, the line is skipped.
 
 ## Legend
 

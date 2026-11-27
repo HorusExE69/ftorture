@@ -37,8 +37,9 @@ class ArchiveProject(Project):
     def extra_archives(self, ctx: Context) -> list[Path]:
         return []
 
-    def link(self, ctx: Context, name: str = "tester") -> Path:
-        archive = ctx.options.directory / self.archive
+    def link(self, ctx: Context, name: str = "tester", *, archive: Path | None = None,
+             flags: tuple[str, ...] = ()) -> Path:
+        archive = archive or ctx.options.directory / self.archive
         result = subprocess.run(["nm", "--defined-only", str(archive)], env=ctx.env,
                                 capture_output=True, text=True, check=False)
         if result.returncode:
@@ -51,9 +52,35 @@ class ArchiveProject(Project):
                 ctx.root / "src/memtrack.c", *sorted((ctx.root / "src" / self.source_dir).glob("*.c")),
                 "-Wl,--wrap=malloc", "-Wl,--wrap=free",
                 *(f"-Wl,-u,{symbol}" for symbol in symbols), archive, *self.extra_archives(ctx),
-                "-lm", "-o", executable]
+                *flags, "-lm", "-o", executable]
         ctx.require(args, ctx.build / "link.log")
         return executable
+
+    def sanitized(self, ctx: Context, rule: str, args: list[str], label: str = "") -> Path | None:
+        """-fsanitize pass on the sources `make -nB <rule>` compiles, rebuilt by
+        ftorture with ASan + UBSan into a private archive; same tests, silent."""
+        from .. import sanitize
+        from ..subject.common import compiled_sources, header_dirs
+        if not ctx.options.sanitize:
+            return None
+        if not sanitize.available(ctx):
+            return sanitize.write(ctx, [], label=label, skipped=ctx.message(
+                "this compiler cannot link -fsanitize=address,undefined",
+                "ce compilateur ne sait pas lier -fsanitize=address,undefined"))
+        root = ctx.options.directory
+        dry = subprocess.run(["make", "--no-print-directory", "-C", str(root), "-nB", rule], env=ctx.env,
+                             capture_output=True, text=True, check=False).stdout
+        sources = [root / name for name in sorted(compiled_sources(root, dry))]
+        out = ctx.build / "sanitize" / f"obj-{rule}"
+        objects, error = sanitize.compile_objects(ctx, sources, out, includes=header_dirs(root))
+        if not objects:
+            return sanitize.write(ctx, [], label=label, skipped=ctx.message(
+                "sources do not compile alone; see ", "les sources ne compilent pas seules ; voir ") + str(out))
+        archive = out / f"san-{self.archive}"
+        archive.unlink(missing_ok=True)
+        ctx.require(["ar", "rcs", archive, *objects], out / "ar.log")
+        executable = self.link(ctx, f"tester-san-{rule}", archive=archive, flags=sanitize.LINK_FLAGS)
+        return sanitize.write(ctx, sanitize.run(ctx, executable, args, rule), label=label)
 
     def cleanup(self, ctx: Context) -> None:
         status = self.make(ctx, "fclean", log="fclean.log")

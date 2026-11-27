@@ -101,6 +101,8 @@ def parser(lang: str) -> argparse.ArgumentParser:
         "passer les vérifications style/hygiène KO en avertissements"))
     result.add_argument("--no-checks", action="store_true", help=t("skip subject checks", "ignorer les vérifications du sujet"))
     result.add_argument("--no-norm", action="store_true", help=t("skip norminette (or flake8/mypy)", "ignorer norminette (ou flake8/mypy)"))
+    result.add_argument("--no-sanitize", action="store_true", help=t(
+        "skip the -fsanitize=address,undefined pass", "sauter la passe -fsanitize=address,undefined"))
     result.add_argument("--no-hidden", action="store_true", help=t("ignore hidden files and folders", "ignorer les fichiers et dossiers cachés"))
     result.add_argument("--no-color", action="store_true", help=t("disable colors", "désactiver les couleurs"))
     result.add_argument("--repro", metavar="TEST", help=t(
@@ -193,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                           no_color=args.no_color, ignore_hidden=args.no_hidden,
                           files=tuple(item for value in args.files for item in value.split(",") if item.strip()),
                           checker=args.checker,
+                          sanitize=not args.no_sanitize,
                           repro=args.repro, gdb=args.gdb)
         if args.gdb and not args.repro:
             cli.error("--gdb needs --repro")
