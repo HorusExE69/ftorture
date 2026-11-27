@@ -185,11 +185,15 @@ def run_sharded(ctx: Context, directory: Path, command, env_for, timeout: int) -
     shutil.rmtree(directory, ignore_errors=True)
     total = workers()
     dirs, procs = [], []
+    ctx.shard_started(total)
     for k in range(total):
         shard = directory / f"s{k}"
         shard.mkdir(parents=True)
         log = open(shard / "output.log", "w")
-        process = subprocess.Popen([*command(shard), "--shard", f"{k}/{total}"], cwd=ctx.build,
+        # --split: every FUZZ test is cut in `total` slices, so no single big
+        # fuzzing test keeps one shard busy after the others are done
+        process = subprocess.Popen([*command(shard), "--shard", f"{k}/{total}", "--split", str(total)],
+                                   cwd=ctx.build,
                                    env=env_for(shard), stdout=log, stderr=subprocess.STDOUT,
                                    start_new_session=True)
         ctx.track(process)
@@ -202,6 +206,7 @@ def run_sharded(ctx: Context, directory: Path, command, env_for, timeout: int) -
             proc.kill()
             proc.wait()
         log.close()
+        ctx.shard_done()
     return dirs
 
 

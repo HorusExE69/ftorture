@@ -13,6 +13,14 @@ class PrintfProject(ArchiveProject):
         libft = ctx.options.directory / "libft/libft.a"
         return [libft] if libft.is_file() else []
 
+    def slow_rules(self, ctx: Context) -> list[tuple[str, list[str], str]]:
+        rules = []
+        if ctx.options.part != 2:
+            rules.append(("all", ["-p", "1"], ctx.message("mandatory", "obligatoire")))
+        if ctx.options.part != 1 and self.has_bonus(ctx):
+            rules.append(("bonus", ["-p", "2"], "bonus"))
+        return rules
+
     def run(self, ctx: Context) -> int:
         bonus = self.has_bonus(ctx) and ctx.options.part != 1
         mandatory = ctx.options.part != 2
@@ -29,6 +37,10 @@ class PrintfProject(ArchiveProject):
             if result > 1:
                 return result
             first = False
+        # the slow passes of both parts ran in the background meanwhile
+        for part, rule in ((1, "all"), (2, "bonus")):
+            if (part == 1 and not mandatory) or (part == 2 and not bonus):
+                continue
             label = ctx.message("mandatory", "obligatoire") if part == 1 else "bonus"
             for records in (self.memchecked(ctx, rule, ["-p", str(part)], label),
                             self.sanitized(ctx, rule, ["-p", str(part)], label)):

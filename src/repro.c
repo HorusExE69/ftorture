@@ -298,6 +298,16 @@ const char	*zft_mem(const void *p, size_t n)
 	return (b);
 }
 
+/* FUZZ_LOOP: the whole loop, each case seeded like in the engine */
+int			g_slice = 0;
+int			g_slices = 1;
+static uint32_t	g_repro_seed = 42;
+
+void	zft_fuzz(int k)
+{
+	zsrand(g_repro_seed * 2654435761u ^ ((unsigned)k + 1) * 40503u);
+}
+
 void	zft_soft(void)
 {
 }
@@ -393,7 +403,8 @@ int	main(int ac, char **av)
 	}
 	idx = atoi(av[1]);
 	g_fail_at = ac > 2 ? atoi(av[2]) : 0;
-	zsrand(ac > 3 ? (uint32_t)strtoul(av[3], NULL, 10) : 42);
+	g_repro_seed = ac > 3 ? (uint32_t)strtoul(av[3], NULL, 10) : 42;
+	zsrand(g_repro_seed);
 	for (int i = 0; i < g_ntests; i++)
 		if (g_tests[i].idx == idx)
 			t = &g_tests[i];

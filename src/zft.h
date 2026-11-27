@@ -45,6 +45,9 @@ typedef struct s_test
 						   -1 for tests registered at run time.          */
 	int			pos;	/* position in its suite, among the selected tests
 						   (the "index" of its test event)                  */
+	int			fuzz;	/* FUZZ_TEST: its FUZZ_LOOP may be cut in slices     */
+	int			slice;	/* this copy runs slice `slice` of `slices` (--split) */
+	int			slices;
 }	t_test;
 
 void	zft_register(const char *func, const char *name, t_kind kind, int spec,
@@ -63,6 +66,15 @@ void	zft_register(const char *func, const char *name, t_kind kind, int spec,
 
 /* Plain test with assertions.                                              */
 # define TEST(F, NAME)      TEST_EX(F, NAME, K_NORMAL, 0)
+/* A fuzzing test: its cases come from FUZZ_LOOP(k, N), each seeded by its
+   number k. The normal pass runs it whole; the valgrind and sanitizer passes
+   (engine --split N) run it in N slices at once, on exactly the same cases. */
+# define FUZZ_TEST(F, NAME) TEST_EX(F, NAME, K_NORMAL, 2)
+extern int	g_slice;
+extern int	g_slices;
+void		zft_fuzz(int k);
+# define FUZZ_LOOP(k, n) for (int k = (int)((long)(n) * g_slice / g_slices); \
+	k < (int)((long)(n) * (g_slice + 1) / g_slices) && (zft_fuzz(k), 1); k++)
 /* Plain test whose expectation is not required by the subject.             */
 # define SPEC_TEST(F, NAME) TEST_EX(F, NAME, K_NORMAL, 1)
 /* ft vs real function. Crash rules:

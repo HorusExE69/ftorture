@@ -144,12 +144,12 @@ static void	gen_fmt(char *fmt, size_t sz, char *conv)
 	*conv = c;
 }
 
-TEST(pf_combo, "aléatoire : combinaisons définies (5000 cas)")
+FUZZ_TEST(pf_combo, "aléatoire : combinaisons définies (5000 cas)")
 {
 	char	fmt[48];
 	char	c;
 
-	for (int k = 0; k < 5000; k++)
+	FUZZ_LOOP(k, 5000)
 	{
 		gen_fmt(fmt, sizeof(fmt), &c);
 		if (c == 'c')
@@ -213,11 +213,11 @@ TEST(pf_combo, "flags : lit un int, pas un long (32 bits hauts sales)")
 
 /* random flags, width and precision on every conversion they are defined
    for, compared with printf                                             */
-TEST(pf_combo, "aléatoire : flags + largeur + précision (3000 cas)")
+FUZZ_TEST(pf_combo, "aléatoire : flags + largeur + précision (3000 cas)")
 {
 	char	fmt[64];
 
-	for (int k = 0; k < 3000; k++)
+	FUZZ_LOOP(k, 3000)
 	{
 		const char	*convs = "diuxXscp";
 		char		c = convs[zrand() % 8];

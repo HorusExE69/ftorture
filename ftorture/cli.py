@@ -149,12 +149,16 @@ def execute(ctx: Context, project: Project) -> int:
             if ctx.options.repro:
                 from .repro import run as run_repro
                 return run_repro(ctx, project)
+            # valgrind and the sanitizers start now, during the checks and tests
+            if hasattr(project, "prestart"):
+                project.prestart(ctx)
             if ctx.options.checks:
                 project.checks(ctx)
             status = project.run(ctx)
             completed = True
             return status
         finally:
+            ctx.stop_background()
             project.cleanup(ctx)
             if completed:
                 run_footer(ctx.options)

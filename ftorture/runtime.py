@@ -8,9 +8,13 @@ import shlex
 import signal
 import subprocess
 import threading
+from concurrent.futures import TimeoutError
 import sys
 
 from .language import text
+
+
+_COUNTERS = threading.Lock()
 
 
 class RunnerError(Exception):
@@ -203,6 +207,48 @@ class Context:
             from .renderer import Renderer
             self._renderer = Renderer(self.options, self.root / "ftorture.log", repro_prefix=self.repro_prefix())
         return self._renderer
+
+    # ---- background work (valgrind, sanitizers) -----------------------------
+    @property
+    def slow(self) -> dict:
+        """Futures of the passes started early, by (kind, rule)."""
+        if not hasattr(self, "_slow"):
+            self._slow = {}
+        return self._slow
+
+    def background(self, fn, *args):
+        if not hasattr(self, "_pool"):
+            from concurrent.futures import ThreadPoolExecutor
+            self._pool = ThreadPoolExecutor(4)
+        return self._pool.submit(fn, *args)
+
+    def shard_started(self, count: int) -> None:
+        with _COUNTERS:
+            self._shards = getattr(self, "_shards", 0) + count
+
+    def shard_done(self) -> None:
+        with _COUNTERS:
+            self._shards_done = getattr(self, "_shards_done", 0) + 1
+
+    def wait(self, future):
+        """future.result(), with a live "▶ valgrind + sanitizers… 5/16" line."""
+        tty = sys.stdout.isatty()
+        while True:
+            try:
+                return future.result(timeout=0.2)
+            except TimeoutError:
+                if tty:
+                    done, total = getattr(self, "_shards_done", 0), getattr(self, "_shards", 0)
+                    label = self.message("valgrind + sanitizers", "valgrind + sanitizers")
+                    print(f"\r\033[K   ▶ {label}… {done}/{total}", end="", flush=True)
+            finally:
+                if tty and future.done():
+                    print("\r\033[K", end="", flush=True)
+
+    def stop_background(self) -> None:
+        self.kill_children()
+        if hasattr(self, "_pool"):
+            self._pool.shutdown(wait=False, cancel_futures=True)
 
     # ---- parallel runs: capture now, display later in order ------------------
     def track(self, process: subprocess.Popen) -> None:

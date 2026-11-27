@@ -457,12 +457,16 @@ le temps parfait et le vrai temps de chaque fonction et tous les coûts de la ma
 ## Vitesse
 
 Sur une machine à 20 cœurs, un run complet (vérifications, tests, valgrind, sanitizers) :
-libft **~9 s** (92 s avant), ft_printf **~10 s** (24 s), get_next_line **~32 s** (126 s),
+libft **~6 s** (92 s avant), ft_printf **~4 s** (24 s), get_next_line **~32 s** (126 s),
 sans aucun test en moins :
 
 - les enfants de test qui plantent exprès (tests `NULL`, crashs comparés à la libc) ne
   déclenchent plus de core dump ni le rapporteur de crash du système (apport) ;
-- valgrind et les sanitizers tournent en parallèle, découpés test par test ; les 18
+- valgrind et les sanitizers démarrent dès le début, en arrière-plan, pendant les
+  vérifications et les tests normaux (une ligne « ▶ valgrind + sanitizers… 5/16 » montre
+  ce qu'il reste s'il faut encore attendre) ; ils tournent en parallèle, découpés test
+  par test, et les gros tests de fuzzing sont coupés en tranches qui rejouent exactement
+  les mêmes cas (le passage normal les affiche toujours comme un seul test) ; les 18
   passes `BUFFER_SIZE` de get_next_line sont compilées et lancées en même temps, puis
   affichées dans l'ordre habituel (avec `-e`, les passes normales restent l'une après
   l'autre pour que les mesures de temps restent justes) ;

@@ -55,9 +55,10 @@ static struct s_opt
 	int			eff_target;
 	const char	*names;			/* --name: only tests whose name has one item  */
 	const char	*skip_names;	/* --skip-name: not the tests that have one    */
-	int			shard;			/* --shard K/N: only the functions i % N == K  */
+	int			shard;			/* --shard K/N: only the tests i % N == K      */
 	int			shards;
-}	o = {0, 0, NULL, ".", 42, 3, 0, 0, 0, 50, NULL, NULL, 0, 1};
+	int			split;			/* --split N: FUZZ tests run in N slices       */
+}	o = {0, 0, NULL, ".", 42, 3, 0, 0, 0, 50, NULL, NULL, 0, 1, 1};
 
 #define L(fr, en) (o.english ? (en) : (fr))
 
@@ -161,8 +162,11 @@ void	zft_register(const char *func, const char *name, t_kind kind, int spec,
 	}
 	int	seq = g_ntests++;
 
-	g_tests[seq] = (t_test){func, name, kind, spec, fn, file, line,
+	/* spec bit 2: FUZZ_TEST (sliceable), bit 1: speculative */
+	g_tests[seq] = (t_test){func, name, kind, spec & 1, fn, file, line,
 		seq + 1, idx};
+	g_tests[seq].fuzz = (spec & 2) != 0;
+	g_tests[seq].slices = 1;
 }
 
 static int	func_index(const char *name)
@@ -368,6 +372,15 @@ void	zft_input(const char *fmt, ...)
 
 const char	*zft_path(void) { return (o.path); }
 void		zft_soft(void) { g_shm->soft = 1; }
+
+int	g_slice = 0;
+int	g_slices = 1;
+
+/* every FUZZ_LOOP case has its own seed: a slice replays exactly its cases */
+void	zft_fuzz(int k)
+{
+	zsrand(o.seed * 2654435761u ^ ((unsigned)k + 1) * 40503u);
+}
 int			zft_en(void) { return (o.english); }
 
 /* ======================================================== child runner === */
@@ -461,6 +474,8 @@ static void	run_child(const t_test *t, int ref, int fail_at, t_run *out)
 		no_core_dump();
 		alarm((unsigned)o.timeout);
 		zsrand(o.seed);
+		g_slice = t->slice;
+		g_slices = t->slices > 0 ? t->slices : 1;
 		g_ref = ref;
 		g_fail_at = fail_at;
 		g_armed = 0;
@@ -1298,6 +1313,8 @@ int	main(int ac, char **av)
 			o.names = av[++i];
 		else if (!strcmp(a, "--skip-name") && i + 1 < ac)
 			o.skip_names = av[++i];
+		else if (!strcmp(a, "--split") && i + 1 < ac)
+			o.split = atoi(av[++i]) > 1 ? atoi(av[i]) : 1;
 		else if (!strcmp(a, "--shard") && i + 1 < ac)
 		{
 			/* the valgrind / sanitizer passes split by whole functions */
@@ -1340,6 +1357,36 @@ int	main(int ac, char **av)
 	for (i = 0; i < g_ntests; i++)
 		g_tests[i].pos = i && !strcmp(g_tests[i].func, g_tests[i - 1].func)
 			? g_tests[i - 1].pos + 1 : 1;
+	if (o.split > 1)
+	{
+		/* each FUZZ test becomes `split` copies, one slice of its loop each
+		   (same seq and pos: the reports map back to the same test)     */
+		int	extra = 0;
+
+		for (i = 0; i < g_ntests; i++)
+			extra += g_tests[i].fuzz ? o.split - 1 : 0;
+		if (extra)
+		{
+			t_test	*all = calloc((size_t)(g_ntests + extra), sizeof(*all));
+			int		k = 0;
+			int		j;
+
+			if (!all)
+				abort();
+			for (i = 0; i < g_ntests; i++)
+				for (j = 0; j < (g_tests[i].fuzz ? o.split : 1); j++)
+				{
+					all[k] = g_tests[i];
+					all[k].slice = j;
+					all[k].slices = g_tests[i].fuzz ? o.split : 1;
+					k++;
+				}
+			free(g_tests);
+			g_tests = all;
+			g_ntests = k;
+			g_cap = k;
+		}
+	}
 	if (o.skip_names || o.shards > 1)
 	{
 		int	k = 0;

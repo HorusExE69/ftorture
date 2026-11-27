@@ -91,11 +91,11 @@ SPEC_TEST(ft_substr, "start > strlen : alloue 1 octet")
 	EXACT_ALLOC(r);
 	free(r);
 }
-TEST(ft_substr, "aléatoire vs référence (2000 cas)")
+FUZZ_TEST(ft_substr, "aléatoire vs référence (2000 cas)")
 {
 	char	s[40];
 
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 	{
 		unsigned	st = zrand() % 45;
 		size_t		ln = zrand() % 45;
@@ -216,12 +216,12 @@ SPEC_TEST(ft_strtrim, "taille exacte")
 	EXACT_ALLOC(r);
 	free(r);
 }
-TEST(ft_strtrim, "aléatoire vs référence (2000 cas)")
+FUZZ_TEST(ft_strtrim, "aléatoire vs référence (2000 cas)")
 {
 	char	s[30];
 	char	set[5];
 
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 	{
 		char	*a;
 		char	*b;
@@ -322,11 +322,11 @@ TEST(ft_split, "long (1000 mots)")
 	EQ_SZ(n, 1000);
 	free_split(r);
 }
-TEST(ft_split, "aléatoire vs référence (2000 cas)")
+FUZZ_TEST(ft_split, "aléatoire vs référence (2000 cas)")
 {
 	char	s[40];
 
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 	{
 		char	**a;
 		char	**b;
@@ -377,9 +377,9 @@ TEST(ft_itoa, "positifs")        { ITOA(1); ITOA(9); ITOA(10); ITOA(42); ITOA(10
 TEST(ft_itoa, "négatifs")        { ITOA(-1); ITOA(-9); ITOA(-10); ITOA(-42); ITOA(-100); }
 TEST(ft_itoa, "INT_MAX")         { ITOA(INT_MAX); }
 TEST(ft_itoa, "INT_MIN")         { ITOA(INT_MIN); }
-TEST(ft_itoa, "aléatoire (5000 cas)")
+FUZZ_TEST(ft_itoa, "aléatoire (5000 cas)")
 {
-	for (int k = 0; k < 5000; k++)
+	FUZZ_LOOP(k, 5000)
 		ITOA((int)zrand() >> (zrand() % 31));
 }
 SPEC_TEST(ft_itoa, "taille exacte")
@@ -625,9 +625,9 @@ VS(ft_putendl_fd, "s NULL")
 TEST(ft_putnbr_fd, "0, positifs, négatifs") { PUTNBR(0); PUTNBR(5); PUTNBR(42); PUTNBR(-42); PUTNBR(100); PUTNBR(-100); }
 TEST(ft_putnbr_fd, "INT_MAX")               { PUTNBR(INT_MAX); }
 TEST(ft_putnbr_fd, "INT_MIN")               { PUTNBR(INT_MIN); }
-TEST(ft_putnbr_fd, "aléatoire (2000 cas)")
+FUZZ_TEST(ft_putnbr_fd, "aléatoire (2000 cas)")
 {
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 		PUTNBR((int)zrand() >> (zrand() % 31));
 }
 TEST(ft_putnbr_fd, "fd invalide (-1) : pas de crash")

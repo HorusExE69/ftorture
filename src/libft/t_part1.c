@@ -281,12 +281,12 @@ TEST(ft_memmove, "chevauchement aux bords des buffers gardés")
 	for (int i = 0; i < 63; i++)
 		EQ_INT(b[i], i);
 }
-TEST(ft_memmove, "aléatoire vs memmove (2000 cas)")
+FUZZ_TEST(ft_memmove, "aléatoire vs memmove (2000 cas)")
 {
 	char	a[300];
 	char	b[300];
 
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 	{
 		size_t	n = zrand() % 120;
 		size_t	s = zrand() % 150;
@@ -339,13 +339,13 @@ TEST(ft_strlcpy, "dst gardé, size exact")
 	EQ_SZ(ft_strlcpy(d, "hello world", 6), 11);
 	EQ_STR(d, "hello");
 }
-TEST(ft_strlcpy, "aléatoire vs BSD (2000 cas)")
+FUZZ_TEST(ft_strlcpy, "aléatoire vs BSD (2000 cas)")
 {
 	char	src[80];
 	char	a[80];
 	char	b[80];
 
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 	{
 		size_t	l = zrand() % 70;
 		size_t	sz = zrand() % 75;
@@ -404,13 +404,13 @@ TEST(ft_strlcat, "dst non terminé dans size : ne lit pas au-delà")
 	EQ_SZ(ft_strlcat(d, "xyz", 4), 7);
 	EQ_MEM(d, "abcd", 4);
 }
-TEST(ft_strlcat, "aléatoire vs BSD (2000 cas)")
+FUZZ_TEST(ft_strlcat, "aléatoire vs BSD (2000 cas)")
 {
 	char	src[40];
 	char	a[90];
 	char	b[90];
 
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 	{
 		size_t	ls = zrand() % 35;
 		size_t	ld = zrand() % 40;
@@ -576,12 +576,12 @@ TEST(ft_strncmp, "ne lit pas plus de n octets (gardé)")
 
 	EQ_INT(ft_strncmp(a, b, 4), 0);
 }
-TEST(ft_strncmp, "aléatoire vs libc, signe (5000 cas)")
+FUZZ_TEST(ft_strncmp, "aléatoire vs libc, signe (5000 cas)")
 {
 	char	a[32];
 	char	b[32];
 
-	for (int k = 0; k < 5000; k++)
+	FUZZ_LOOP(k, 5000)
 	{
 		size_t	la = zrand() % 20;
 		size_t	lb = zrand() % 20;
@@ -677,12 +677,12 @@ TEST(ft_memcmp, "n = 0 et lecture bornée (gardé)")
 	EQ_INT(ft_memcmp("a", "b", 0), 0);
 	EQ_INT(ft_memcmp(gmem("xyz", 3), gmem("xyz", 3), 3), 0);
 }
-TEST(ft_memcmp, "aléatoire vs libc, signe (5000 cas)")
+FUZZ_TEST(ft_memcmp, "aléatoire vs libc, signe (5000 cas)")
 {
 	unsigned char	a[24];
 	unsigned char	b[24];
 
-	for (int k = 0; k < 5000; k++)
+	FUZZ_LOOP(k, 5000)
 	{
 		size_t	n = zrand() % 24;
 
@@ -730,12 +730,12 @@ TEST(ft_strnstr, "big non terminé dans len : lecture bornée")
 	EQ_PTR(ft_strnstr(b, "xyz", 5), NULL);
 	EQ_PTR(ft_strnstr(b, "de", 5), b + 3);
 }
-TEST(ft_strnstr, "aléatoire vs BSD (3000 cas)")
+FUZZ_TEST(ft_strnstr, "aléatoire vs BSD (3000 cas)")
 {
 	char	big[24];
 	char	lit[6];
 
-	for (int k = 0; k < 3000; k++)
+	FUZZ_LOOP(k, 3000)
 	{
 		size_t	lb = zrand() % 20;
 		size_t	ll = zrand() % 5;
@@ -782,11 +782,11 @@ TEST(ft_atoi, "s'arrête au premier non-chiffre") { ATOI("12ab34"); ATOI("12 34"
 TEST(ft_atoi, "pas de chiffre")        { ATOI(""); ATOI("abc"); ATOI("-"); ATOI("+"); ATOI(" "); }
 TEST(ft_atoi, "INT_MAX / INT_MIN")     { ATOI("2147483647"); ATOI("-2147483648"); ATOI("+2147483647"); }
 TEST(ft_atoi, "espace non-isspace avant (\\x1c, \\b)") { ATOI("\x1c" "5"); ATOI("\b5"); ATOI("\0335"); }
-TEST(ft_atoi, "aléatoire vs libc dans [INT_MIN, INT_MAX] (5000 cas)")
+FUZZ_TEST(ft_atoi, "aléatoire vs libc dans [INT_MIN, INT_MAX] (5000 cas)")
 {
 	char	buf[40];
 
-	for (int k = 0; k < 5000; k++)
+	FUZZ_LOOP(k, 5000)
 	{
 		int	v = (int)zrand();
 

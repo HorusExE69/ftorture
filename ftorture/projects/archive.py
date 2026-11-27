@@ -38,7 +38,7 @@ class ArchiveProject(Project):
         return []
 
     def link(self, ctx: Context, name: str = "tester", *, archive: Path | None = None,
-             flags: tuple[str, ...] = ()) -> Path:
+             flags: tuple[str, ...] = (), extra: bool = True) -> Path:
         archive = archive or ctx.options.directory / self.archive
         result = subprocess.run(["nm", "--defined-only", str(archive)], env=ctx.env,
                                 capture_output=True, text=True, check=False)
@@ -62,62 +62,82 @@ class ArchiveProject(Project):
             raise RunnerError(ctx.message("Command failed; see", "Échec ; voir") + f" {logs / (bad.stem + '.log')}")
         args = [*ctx.cc, *objects,
                 "-Wl,--wrap=malloc", "-Wl,--wrap=free",
-                *(f"-Wl,-u,{symbol}" for symbol in symbols), archive, *self.extra_archives(ctx),
+                *(f"-Wl,-u,{symbol}" for symbol in symbols), archive, *(self.extra_archives(ctx) if extra else ()),
                 *flags, "-lm", "-o", executable]
         ctx.require(args, ctx.build / "link.log")
         return executable
 
-    def sanitized(self, ctx: Context, rule: str, args: list[str], label: str = "") -> Path | None:
-        """-fsanitize pass on the sources `make -nB <rule>` compiles, rebuilt by
-        ftorture with ASan + UBSan into a private archive; same tests, silent."""
-        from .. import sanitize
-        from ..subject.common import compiled_sources, header_dirs
-        if not ctx.options.sanitize:
-            return None
-        if not sanitize.available(ctx):
-            return sanitize.write(ctx, [], label=label, skipped=ctx.message(
-                "this compiler cannot link -fsanitize=address,undefined",
-                "ce compilateur ne sait pas lier -fsanitize=address,undefined"))
-        root = ctx.options.directory
-        dry = subprocess.run(["make", "--no-print-directory", "-C", str(root), "-nB", rule], env=ctx.env,
-                             capture_output=True, text=True, check=False).stdout
-        sources = [root / name for name in sorted(compiled_sources(root, dry))]
-        out = ctx.build / "sanitize" / f"obj-{rule}"
-        objects, error = sanitize.compile_objects(ctx, sources, out, includes=header_dirs(root))
-        if not objects:
-            return sanitize.write(ctx, [], label=label, skipped=ctx.message(
-                "sources do not compile alone; see ", "les sources ne compilent pas seules ; voir ") + str(out))
-        archive = out / f"san-{self.archive}"
-        archive.unlink(missing_ok=True)
-        ctx.require(["ar", "rcs", archive, *objects], out / "ar.log")
-        executable = self.link(ctx, f"tester-san-{rule}", archive=archive, flags=sanitize.LINK_FLAGS)
-        return sanitize.write(ctx, sanitize.run(ctx, executable, args, rule), label=label)
+    # ---- valgrind and -fsanitize passes ------------------------------------
+    # Both rebuild the sources `make -nB <rule>` compiles into a private archive
+    # (-g for valgrind, ASan + UBSan for the sanitizers) and run the same tests
+    # silently. They are started in the background before the checks
+    # (prestart) and only read once the normal pass has been displayed.
+    def slow_rules(self, ctx: Context) -> list[tuple[str, list[str], str]]:
+        """(make rule, tester args, label) of the passes to check."""
+        args = ["-p", str(ctx.options.part)] if ctx.options.part else []
+        return [("all", args, "")]
 
-    def memchecked(self, ctx: Context, rule: str, args: list[str], label: str = "") -> Path | None:
-        """valgrind pass: the sources of `make -nB <rule>` rebuilt with -g (so
-        every error has its file:line even without -g in the Makefile), the
-        same tests, memtrack off so valgrind's malloc sees every block."""
+    def _slow_job(self, ctx: Context, kind: str, rule: str, args: list[str], extra: bool) -> tuple[str, object]:
+        """Build and run one slow pass (thread-safe): ("dirs", shard dirs),
+        ("skip", reason) or ("retry", reason) when linking needs libft.a."""
         from .. import sanitize, valgrind
         from ..subject.common import compiled_sources, header_dirs
-        if not ctx.options.valgrind:
-            return None
-        if not valgrind.available():
-            return valgrind.records(ctx, [], label=label, skipped=ctx.message(
-                "valgrind not installed", "valgrind non installé"))
+        if kind == "vg" and not valgrind.available():
+            return "skip", ctx.message("valgrind not installed", "valgrind non installé")
+        if kind == "san" and not sanitize.available(ctx):
+            return "skip", ctx.message("this compiler cannot link -fsanitize=address,undefined",
+                                       "ce compilateur ne sait pas lier -fsanitize=address,undefined")
         root = ctx.options.directory
         dry = subprocess.run(["make", "--no-print-directory", "-C", str(root), "-nB", rule], env=ctx.env,
                              capture_output=True, text=True, check=False).stdout
         sources = [root / name for name in sorted(compiled_sources(root, dry))]
-        out = ctx.build / "valgrind" / f"obj-{rule}"
-        objects, _ = sanitize.compile_objects(ctx, sources, out, includes=header_dirs(root), flags=("-g", "-O0"))
+        out = ctx.build / ("valgrind" if kind == "vg" else "sanitize") / f"obj-{rule}"
+        flags = ("-g", "-O0") if kind == "vg" else sanitize.SAN_FLAGS
+        objects, _ = sanitize.compile_objects(ctx, sources, out, includes=header_dirs(root), flags=flags)
         if not objects:
-            return valgrind.records(ctx, [], label=label, skipped=ctx.message(
-                "sources do not compile alone; see ", "les sources ne compilent pas seules ; voir ") + str(out))
-        archive = out / f"g-{self.archive}"
+            return "skip", ctx.message("sources do not compile alone; see ",
+                                       "les sources ne compilent pas seules ; voir ") + str(out)
+        archive = out / f"{kind}-{self.archive}"
         archive.unlink(missing_ok=True)
         ctx.require(["ar", "rcs", archive, *objects], out / "ar.log")
-        executable = self.link(ctx, f"tester-g-{rule}", archive=archive)
-        return valgrind.records(ctx, valgrind.run(ctx, executable, args, rule), label=label)
+        try:
+            executable = self.link(ctx, f"tester-{kind}-{rule}", archive=archive, extra=extra,
+                                   flags=() if kind == "vg" else sanitize.LINK_FLAGS)
+        except RunnerError as error:
+            return ("retry" if not extra else "skip"), str(error)
+        if kind == "vg":
+            return "dirs", valgrind.execute(ctx, executable, args, rule)
+        return "dirs", sanitize.execute(ctx, executable, args, rule)
+
+    def prestart(self, ctx: Context) -> None:
+        """Start the slow passes now, while the checks and the normal tests run
+        (not with -e: nothing may run while the code is timed)."""
+        if ctx.options.efficiency:
+            return
+        for rule, args, _ in self.slow_rules(ctx):
+            for kind, enabled in (("vg", ctx.options.valgrind), ("san", ctx.options.sanitize)):
+                if enabled:
+                    ctx.slow[(kind, rule)] = ctx.background(self._slow_job, ctx, kind, rule, args, False)
+
+    def slow_pass(self, ctx: Context, kind: str, rule: str, args: list[str], label: str = "") -> Path | None:
+        from .. import sanitize, valgrind
+        if not (ctx.options.valgrind if kind == "vg" else ctx.options.sanitize):
+            return None
+        future = ctx.slow.pop((kind, rule), None)
+        state, value = ctx.wait(future) if future else self._slow_job(ctx, kind, rule, args, True)
+        if state == "retry":        # its libft.a was not built yet: link it now
+            state, value = self._slow_job(ctx, kind, rule, args, True)
+        if kind == "vg":
+            return valgrind.records(ctx, valgrind.gather(ctx, value) if state == "dirs" else [], label=label,
+                                    skipped="" if state == "dirs" else str(value))
+        return sanitize.write(ctx, sanitize.gather(ctx, value) if state == "dirs" else [], label=label,
+                              skipped="" if state == "dirs" else str(value))
+
+    def sanitized(self, ctx: Context, rule: str, args: list[str], label: str = "") -> Path | None:
+        return self.slow_pass(ctx, "san", rule, args, label)
+
+    def memchecked(self, ctx: Context, rule: str, args: list[str], label: str = "") -> Path | None:
+        return self.slow_pass(ctx, "vg", rule, args, label)
 
     def cleanup(self, ctx: Context) -> None:
         status = self.make(ctx, "fclean", log="fclean.log")

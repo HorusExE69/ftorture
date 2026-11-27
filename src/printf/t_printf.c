@@ -74,7 +74,7 @@ TEST(K, "INT_MAX / INT_MIN") { PF(CONV, INT_MAX); PF(CONV, INT_MIN); \
 	PF(CONV, INT_MAX - 1); PF(CONV, INT_MIN + 1); } \
 TEST(K, "plusieurs + texte") { PF("a" CONV "b" CONV "c", 1, -2); \
 	PF(CONV " " CONV " " CONV, INT_MIN, 0, INT_MAX); } \
-TEST(K, "aléatoire (3000 cas)") { for (int k = 0; k < 3000; k++) \
+FUZZ_TEST(K, "aléatoire (3000 cas)") { FUZZ_LOOP(k, 3000) \
 	pf_one_i(__FILE__, __LINE__, CONV, pf_rand_int()); }
 
 INT_SUITE(pf_d, "%d")
@@ -85,9 +85,9 @@ TEST(pf_u, "0 et positifs")           { PF("%u", 0); PF("%u", 1); PF("%u", 42); 
 TEST(pf_u, "UINT_MAX")                { PF("%u", UINT_MAX); PF("%u", UINT_MAX - 1); }
 TEST(pf_u, "négatifs vus en unsigned") { PF("%u", -1); PF("%u", -42); PF("%u", INT_MIN); }
 TEST(pf_u, "plusieurs + texte")       { PF("%u%u", 1u, 2u); PF("[%u] [%u]", 0u, UINT_MAX); }
-TEST(pf_u, "aléatoire (3000 cas)")
+FUZZ_TEST(pf_u, "aléatoire (3000 cas)")
 {
-	for (int k = 0; k < 3000; k++)
+	FUZZ_LOOP(k, 3000)
 		pf_one_u(__FILE__, __LINE__, "%u", pf_rand_uint());
 }
 
@@ -99,7 +99,7 @@ TEST(K, "valeurs typiques") { PF(CONV, 0xdeadbeef); PF(CONV, 0xcafe); \
 TEST(K, "UINT_MAX, -1, INT_MIN") { PF(CONV, UINT_MAX); PF(CONV, -1); \
 	PF(CONV, INT_MIN); PF(CONV, 0x80000000u); } \
 TEST(K, "plusieurs + texte") { PF("0x" CONV " " CONV, 255u, 16u); } \
-TEST(K, "aléatoire (3000 cas)") { for (int k = 0; k < 3000; k++) \
+FUZZ_TEST(K, "aléatoire (3000 cas)") { FUZZ_LOOP(k, 3000) \
 	pf_one_u(__FILE__, __LINE__, CONV, pf_rand_uint()); }
 
 HEX_SUITE(pf_x, "%x")
@@ -143,11 +143,11 @@ TEST(pf_mix, "longue sortie (retour > 10 000)")
 	s[5000] = 0;
 	PF("%s|%s|%d", s, s, 12345);
 }
-TEST(pf_mix, "aléatoire : texte + conversions mélangées (1000 cas)")
+FUZZ_TEST(pf_mix, "aléatoire : texte + conversions mélangées (1000 cas)")
 {
 	char	fmt[64];
 
-	for (int k = 0; k < 1000; k++)
+	FUZZ_LOOP(k, 1000)
 	{
 		const char	*convs = "cspdiuxX";
 		char		c = convs[zrand() % 8];
@@ -233,12 +233,12 @@ TEST(pf_mix, "8 arguments, les derniers sur la pile, bits hauts sales")
 
 /* random formats of up to 8 conversions, one 64-bit slot per argument (an
    int slot has dirty upper bits: libc reads the low 32 like va_arg(int)) */
-TEST(pf_mix, "aléatoire : 8 conversions par format (2000 cas)")
+FUZZ_TEST(pf_mix, "aléatoire : 8 conversions par format (2000 cas)")
 {
 	char	fmt[256];
 	long	a[8];
 
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 	{
 		size_t	l = 0;
 		int		n = 1 + (int)(zrand() % 8);
@@ -301,18 +301,18 @@ TEST(pf_pct, "%% collé aux conversions")
 	PF("%%%c%%%c%%", 'a', 'b');
 	PF("%d%%%d", 1, 2);
 }
-TEST(pf_p, "pointeurs aléatoires (2000 cas)")
+FUZZ_TEST(pf_p, "pointeurs aléatoires (2000 cas)")
 {
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 		pf_one_p(__FILE__, __LINE__, "%p", pf_rand_ptr());
 }
-TEST(pf_s, "chaînes aléatoires (2000 cas)")
+FUZZ_TEST(pf_s, "chaînes aléatoires (2000 cas)")
 {
-	for (int k = 0; k < 2000; k++)
+	FUZZ_LOOP(k, 2000)
 		pf_one_s(__FILE__, __LINE__, "[%s]", pf_rand_str());
 }
-TEST(pf_c, "caractères aléatoires (1000 cas)")
+FUZZ_TEST(pf_c, "caractères aléatoires (1000 cas)")
 {
-	for (int k = 0; k < 1000; k++)
+	FUZZ_LOOP(k, 1000)
 		pf_one_c(__FILE__, __LINE__, "%c", (int)(zrand() % 256));
 }

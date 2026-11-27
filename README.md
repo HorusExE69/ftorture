@@ -459,13 +459,17 @@ perfect and real time of each function and every machine cost
 
 ## Speed
 
-On a 20-core machine, a full run (checks, tests, valgrind, sanitizers): libft **~9 s**
-(92 s before), ft_printf **~10 s** (24 s), get_next_line **~32 s** (126 s), with no test
+On a 20-core machine, a full run (checks, tests, valgrind, sanitizers): libft **~6 s**
+(92 s before), ft_printf **~4 s** (24 s), get_next_line **~32 s** (126 s), with no test
 left out:
 
 - test children that crash on purpose (`NULL` tests, crashes compared with the libc) no
   longer trigger a core dump or the system crash reporter (apport);
-- valgrind and the sanitizers run in parallel, split test by test; get_next_line's 18
+- valgrind and the sanitizers start right away, in the background, during the checks and
+  the normal tests (a "▶ valgrind + sanitizers… 5/16" line shows what is left if you
+  still have to wait); they run in parallel, split test by test, and the big fuzzing
+  tests are cut into slices that replay exactly the same cases (the normal pass still
+  shows each as one test); get_next_line's 18
   `BUFFER_SIZE` passes are built and started at the same time, then displayed in the
   usual order (with `-e` the normal passes stay one after the other so timings stay right);
 - prototypes are checked in a single compile (one per prototype only when it fails);
