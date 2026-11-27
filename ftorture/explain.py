@@ -1,5 +1,6 @@
 """Failure explanations, C test source snippets, --repro tokens, and localization."""
 from pathlib import Path
+import re
 import signal
 
 from .language import text
@@ -48,14 +49,46 @@ TRANSLATIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Entries lost when the C engine's translation table moved here (PR #8).
+TRANSLATIONS += (
+    ("un seul", "a single"), ("entrée standard", "standard input"),
+    ("pipe alimenté par petits morceaux", "pipe fed in small pieces"), ("fd fermé", "closed fd"),
+    ("fd élevé", "high fd"), ("un dossier", "a directory"), ("reçu", "received"), ("échoue", "fails"),
+    ("fermés", "closed"), ("fermé", "closed"), ("sans", "without"), ("avec", "with"),
+    ("alors que", "while"), ("NULL renvoyé", "NULL returned"), ("pas de", "no"), ("ni de", "or"),
+    ("jusqu'à", "up to"), ("Ko", "KB"), ("Mo", "MB"), ("la Bible entière", "the whole Bible"),
+    ("la Bible, début", "the Bible, start"), ("le début de la Bible", "the start of the Bible"),
+    ("la Bible", "the Bible"), ("4,3 Mo", "4.3 MB"), ("100 Ko : buffer > 10 000", "100 KB: buffer > 10 000"),
+    ("chaque opération", "each operation"), ("total des opérations", "operation total"),
+    ("opérations", "operations"), ("nom", "name"), ("bien", "good"), ("rien", "nothing"),
+    ("seul", "alone"), ("de format", "of the format"), ("en fin", "at the end"),
+    ("fichier vide", "empty file"), ("une ligne", "a line"), ("un fichier", "a file"),
+    ("à", "to"), ("un", "a"), ("une", "a"),
+    ("et", "and"), ("ou", "or"), ("en", "in"), ("au", "at"), ("de", "of"),
+)
+
+
+def _translation_pattern() -> tuple[re.Pattern, dict[str, str]]:
+    table: dict[str, str] = {}
+    for fr, en in TRANSLATIONS:
+        key = fr.strip()
+        table.setdefault(key, en.strip() if fr.strip() != fr else en)
+    keys = sorted(table, key=len, reverse=True)
+    # whole words only ("set" must not become "sand"), one pass (no double
+    # translation), longest phrase first
+    alternation = "|".join(re.escape(key) for key in keys)
+    return re.compile(r"(?<!\w)(" + alternation + r")(?!\w)"), table
+
+
+_PATTERN, _TABLE = _translation_pattern()
+
+
 def localize_name(name: str, lang: str) -> str:
+    """French test names and descriptions -> English, whole words only.
+    Test data (inputs, expected / actual values) is never passed here."""
     if lang != "en" or not name:
         return name
-    out = name
-    for fr, en in TRANSLATIONS:
-        if fr in out:
-            out = out.replace(fr, en)
-    return out
+    return _PATTERN.sub(lambda match: _TABLE[match.group(1)], name)
 
 
 def sig_hint(sig: int, lang: str) -> str:

@@ -240,7 +240,7 @@ class Renderer:
         file_path = str(ev.get("file", ""))
         base = Path(file_path).name if file_path else ""
         line = int(ev.get("line", 0))
-        msg = str(ev.get("msg", ""))
+        msg = localize_name(str(ev.get("msg", "")), self.options.lang)
         inp = str(ev.get("input", ""))
         exp = str(ev.get("expected", ""))
         act = str(ev.get("actual", ""))

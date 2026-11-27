@@ -720,7 +720,7 @@ static void	eval_malloc(const t_test *t, t_result *r)
 		}
 	}
 	r->res = R_PASS;
-	r->glyph = "✔";
+	r->glyph = "M";		/* every malloc made to fail is handled: "M" (green) */
 }
 
 /* ======================================================== benchmarks ===== */

@@ -62,3 +62,20 @@ class RendererTests(unittest.TestCase):
             self.assertIn("EFFICIENCY", output)
             self.assertIn("██████  ██  ██", output)
             self.assertIn("TOTAL: 2 ok, 0 failed", log_path.read_text(encoding="utf-8"))
+
+
+class LocalizeTests(unittest.TestCase):
+    def test_whole_words_one_pass_and_lost_entries(self):
+        from ftorture.explain import localize_name
+        cases = {
+            "set NULL": "set NULL",                          # not "sand NULL"
+            "s1 et s2 NULL": "s1 and s2 NULL",
+            "'%' seul en fin de format": "'%' alone at the end of the format",
+            "la Bible entière (King James, 4,3 Mo)": "the whole Bible (King James, 4.3 MB)",
+            "entrée standard (fd 0)": "standard input (fd 0)",
+            "fichier vide": "empty file",
+            "reçu \"abc\"": "received \"abc\"",
+        }
+        for fr, en in cases.items():
+            self.assertEqual(localize_name(fr, "en"), en)
+            self.assertEqual(localize_name(fr, "fr"), fr)
