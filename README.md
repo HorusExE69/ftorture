@@ -473,7 +473,15 @@ result:
 - invalid shifts (`1 << 32`), division by zero, invalid values.
 
 Each problem gives `file.c:line`, the function and the first test that triggered it; ✘
-in general, ▲ when it only happens in speculative tests (undefined inputs). `NULL`
+in general, ▲ when it only happens in speculative tests (undefined inputs).
+
+**Overflows that cancel out**: UBSan does not stop the program, so every test runs to its
+end. When a signed integer overflow only happens in tests that get **the right result** in
+the normal pass (for push_swap: exactly the output of your normal binary), it is noticed
+but not an error: a ✔ "signed overflow that cancels out" line. Example:
+`ft_atoi("-2147483648")` accumulating `2147483640 + 8` then multiplying by `-1` lands on
+`INT_MIN` again. An overflow in a test with a wrong result stays ✘; an out-of-bounds
+access never cancels out. `NULL`
 dereferences stay with the normal tests (compared with the libc's crash). `--no-sanitize`
 skips this pass; without the ASan/UBSan runtimes, the line is skipped.
 

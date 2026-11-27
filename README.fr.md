@@ -471,7 +471,15 @@ section **SANITIZERS** avant le résultat :
 
 Chaque problème donne `fichier.c:ligne`, la fonction et le premier test qui l'a
 déclenché ; ✘ en général, ▲ s'il n'arrive que dans des tests spéculatifs (entrées
-indéfinies). Les déréférencements de `NULL` restent l'affaire des tests normaux (comparés
+indéfinies).
+
+**Overflows qui s'annulent** : UBSan ne stoppe pas le programme, donc chaque test va au
+bout. Si un dépassement d'entier signé n'arrive que dans des tests qui ont **le bon
+résultat** à la passe normale (pour push_swap : exactement la même sortie que ton binaire
+normal), il est remarqué mais ce n'est pas une erreur : ligne ✔ « overflow signé qui
+s'annule ». Exemple : `ft_atoi("-2147483648")` qui accumule `2147483640 + 8` puis
+multiplie par `-1` retombe sur `INT_MIN`. Un overflow dans un test au mauvais résultat
+reste ✘ ; un accès hors limites n'est jamais compensé. Les déréférencements de `NULL` restent l'affaire des tests normaux (comparés
 au crash de la libc). `--no-sanitize` saute cette passe ; si le compilateur n'a pas les
 runtimes ASan/UBSan, la ligne est sautée.
 

@@ -202,15 +202,7 @@ class GnlProject(Project):
                                           "-Wl,--wrap=free", "-Wl,--wrap=read", *sanitize.LINK_FLAGS,
                                           "-lm", "-o", san_exe], out / "san-link.log"):
                     label = f"BUFFER_SIZE={size}" + (" (bonus)" if part == 2 else "")
-                    for item in sanitize.run(ctx, san_exe, args, key):
-                        merged = next((m for m in san_findings if (m.kind, m.where) == (item.kind, item.where)), None)
-                        tests_ = [f"{label} · {name.split(' · ', 1)[-1]}" for name in item.tests]
-                        if merged:
-                            merged.tests += tests_
-                            merged.speculative &= item.speculative
-                        else:
-                            item.tests = tests_
-                            san_findings.append(item)
+                    sanitize.merge(san_findings, sanitize.run(ctx, san_exe, args, key), f"{label} · ")
         if last is None:
             if ctx.options.checks:
                 ctx.renderer.render_checks(ctx.checks_file)

@@ -31,12 +31,13 @@ class CollectTests(unittest.TestCase):
             (root / "srcs").mkdir(parents=True)
             reports.mkdir()
             (reports / "tests.tsv").write_text(
-                "1\tft_itoa\t0\tINT_MIN\n2\tft_itoa\t1\tsurprise\n3\tbs42\t0\tlong line\n4\tpf_edge\t1\t%k\n")
+                "1\tft_itoa\t0\t1\tINT_MIN\n2\tft_itoa\t1\t2\tsurprise\n3\tbs42\t0\t1\tlong line\n"
+                "4\tpf_edge\t1\t1\t%k\n")
             (reports / "t1.100").write_text(UBSAN.format(root=root))
             (reports / "t2.101").write_text(UBSAN.format(root=root))
             (reports / "t3.102").write_text(ASAN.format(root=root))
             (reports / "t4.103").write_text(TESTER_ONLY)
-            findings = collect(reports, root)
+            findings = collect(reports, root)  # no verdicts known: nothing cancels out
             self.assertEqual(len(findings), 2)
             asan = next(f for f in findings if f.kind == "stack-buffer-overflow")
             self.assertEqual((asan.function, asan.where), ("fill", "srcs/fill.c:14"))
@@ -46,6 +47,30 @@ class CollectTests(unittest.TestCase):
             self.assertEqual(ub.where, "ft_itoa.c:25")
             self.assertEqual(ub.tests, ["ft_itoa · INT_MIN", "ft_itoa · surprise"])
             self.assertFalse(ub.speculative)  # one occurrence in a normal test
+            self.assertFalse(ub.compensated)
+            # the normal pass got the right result in the normal test: it cancels out
+            # (the speculative test does not count for that verdict)
+            ub = next(f for f in collect(reports, root, lambda suite, index: index == 1) if f.overflow)
+            self.assertTrue(ub.compensated)
+            # wrong result in the normal test: a real error
+            ub = next(f for f in collect(reports, root, lambda suite, index: index != 1) if f.overflow)
+            self.assertFalse(ub.compensated)
+            # an out-of-bounds access never cancels out
+            asan = next(f for f in collect(reports, root, lambda s, i: True) if not f.overflow)
+            self.assertFalse(asan.compensated)
+
+    def test_cancelled_overflow_is_an_ok_line(self):
+        from ftorture.sanitize import Finding, write
+        from ftorture.runtime import Context, Options
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Context(Path(tmp), "libft", Options(Path(tmp), lang="en"))
+            ok = Finding("signed-integer-overflow", "ft_atoi.c:33", "ft_atoi", "2147483640 + 8", ["ft_atoi · INT_MIN"],
+                         speculative=False, compensated=True)
+            bad = Finding("signed-integer-overflow", "ft_itoa.c:20", "ft_itoa", "negation of -2147483648",
+                          ["ft_itoa · INT_MIN"], speculative=False)
+            records = write(ctx, [ok, bad]).read_text()
+            self.assertIn("C|OK|ft_atoi|ft_atoi.c:33 · signed overflow that cancels out", records)
+            self.assertIn("C|KO|ft_itoa|ft_itoa.c:20 · negation of -2147483648", records)
 
 
 @unittest.skipUnless(shutil.which("cc"), "needs a C compiler")
@@ -75,7 +100,7 @@ class SanitizerRunTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertIn("SANITIZERS", result.stdout)
             self.assertIn("get_next_line.c:", result.stdout)
-            self.assertIn("out of bounds for type 'char [8]'", result.stdout)
+            self.assertIn("stack-buffer-overflow (WRITE of 1 bytes)", result.stdout)
             result = subprocess.run([*run, "--no-sanitize"], capture_output=True, text=True, timeout=300)
             self.assertNotIn("SANITIZERS", result.stdout)
 

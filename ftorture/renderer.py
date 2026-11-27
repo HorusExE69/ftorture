@@ -43,6 +43,7 @@ class Renderer:
         # Aggregated check counters
         self.checks_ok = 0
         self.checks_ko = 0
+        self.results: dict[tuple[str, int], int] = {}
         self.checks_warn = 0
         self.proto_ok = 0
         self.proto_tot = 0
@@ -312,6 +313,7 @@ class Renderer:
                 self.parts[part] = PartStats(part, str(event.get("short", f"part {part}")))
             label = str(event["label"])
             self._cur_label = label
+            self._cur_suite = str(event.get("key", ""))
             self._cur_events = []
             term.write(f"   {term.bold}{_padv(label, 16)}{term.reset} ")
             if event.get("missing"):
@@ -330,6 +332,8 @@ class Renderer:
         if kind == "test":
             res = int(event["res"])
             glyph = str(event["glyph"])
+            # verdict of each test, read by the -fsanitize pass (0/1: passed)
+            self.results[(getattr(self, "_cur_suite", ""), int(event.get("index", 0)))] = res
             gc = term.ph if res == 0 else cyan if res == 1 else amber if res == 3 else term.red
             width = term.inner_width() + 6
             if self._col + 2 > width - 10:

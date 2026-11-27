@@ -385,14 +385,20 @@ static void	san_map(void)
 	char	path[4096];
 	FILE	*f;
 	int		i;
+	int		idx;
 
 	snprintf(path, sizeof(path), "%s/tests.tsv", g_san_dir);
 	f = fopen(path, "w");
 	if (!f)
 		return ;
-	for (i = 0; i < g_ntests; i++)
-		fprintf(f, "%d\t%s\t%d\t%s\n", g_tests[i].seq, g_tests[i].func,
-			g_tests[i].spec, g_tests[i].name);
+	/* seq, suite, speculative, position in its suite (the "index" of the
+	   test events: the -fsanitize pass reads the normal verdicts), name   */
+	for (i = 0, idx = 0; i < g_ntests; i++)
+	{
+		idx = i && !strcmp(g_tests[i].func, g_tests[i - 1].func) ? idx + 1 : 1;
+		fprintf(f, "%d\t%s\t%d\t%d\t%s\n", g_tests[i].seq, g_tests[i].func,
+			g_tests[i].spec, idx, g_tests[i].name);
+	}
 	fclose(f);
 }
 
