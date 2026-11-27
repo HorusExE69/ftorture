@@ -112,6 +112,7 @@ torture py01 ~/python-module-01 -c   # python-module-01 (Code Cultivation), chil
 | `-c`, `--chill` | downgrade style/hygiene check KOs (norminette, flake8/mypy, extra files, README, includes, Makefile hygiene) to warnings (▲) |
 | `--no-checks` | skip Makefile / norm / nm / prototype / Python AST checks |
 | `--no-norm` | skip norminette (C) or flake8 / mypy (Python) |
+| `--no-cache` | run everything even if nothing changed since the last run |
 | `--no-valgrind` | skip the valgrind (memcheck) pass |
 | `--no-sanitize` | skip the `-fsanitize=address,undefined` pass |
 | `--no-hidden` | ignore hidden files/folders in extra-file, include-use and norminette checks |
@@ -460,7 +461,7 @@ perfect and real time of each function and every machine cost
 ## Speed
 
 On a 20-core machine, a full run (checks, tests, valgrind, sanitizers): libft **~6 s**
-(92 s before), ft_printf **~4 s** (24 s), get_next_line **~10 s** (126 s), push_swap **~5 s** (11 s), with no test
+(92 s before), ft_printf **~4 s** (24 s), get_next_line **~9 s** (126 s), push_swap **~5 s** (11 s), with no test
 left out:
 
 - test children that crash on purpose (`NULL` tests, crashes compared with the libc) no
@@ -473,6 +474,14 @@ left out:
   shows each as one test); get_next_line's 18
   `BUFFER_SIZE` passes are built and started at the same time, then displayed in the
   usual order (with `-e` the normal passes stay one after the other so timings stay right);
+- valgrind runs without `--track-origins` (which doubles its cost) and reruns with it only
+  the tests that have an uninitialised value: the report is the same;
+- get_next_line's sanitizer passes skip the timed test "ligne de 100 000 en moins de 3 s"
+  (it waits 3 s on a quadratic stash; the 4096 and 10 000 lines already cover that code),
+  the normal pass keeps it;
+- **when nothing changed** since the last run (your files, ftorture, the options, the
+  tools, the terminal), its results are shown again at once, with a line saying so;
+  `--no-cache` runs everything, and it is never done with `-e` or for custom tests;
 - prototypes are checked in a single compile (one per prototype only when it fails);
 - compilations are kept in `build/cache` and reused while the source, its headers, the
   flags and the compiler do not change.

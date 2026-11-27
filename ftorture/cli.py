@@ -3,6 +3,7 @@ import argparse
 from contextlib import contextmanager
 import fcntl
 from pathlib import Path
+import os
 import platform
 import shutil
 import signal
@@ -103,6 +104,9 @@ def parser(lang: str) -> argparse.ArgumentParser:
     result.add_argument("--no-norm", action="store_true", help=t("skip norminette (or flake8/mypy)", "ignorer norminette (ou flake8/mypy)"))
     result.add_argument("--no-sanitize", action="store_true", help=t(
         "skip the -fsanitize=address,undefined pass", "sauter la passe -fsanitize=address,undefined"))
+    result.add_argument("--no-cache", action="store_true", help=t(
+        "run everything even if nothing changed since the last run",
+        "tout relancer même si rien n'a changé depuis le dernier run"))
     result.add_argument("--no-valgrind", action="store_true", help=t(
         "skip the valgrind (memcheck) pass", "sauter la passe valgrind (memcheck)"))
     result.add_argument("--no-hidden", action="store_true", help=t("ignore hidden files and folders", "ignorer les fichiers et dossiers cachés"))
@@ -131,7 +135,101 @@ def run_lock(root: Path):
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
+class _Tee:
+    """sys.stdout that also keeps what is written (for the result reuse)."""
+
+    def __init__(self, stream) -> None:
+        self.stream = stream
+        self.parts: list[str] = []
+
+    def write(self, text: str) -> int:
+        self.parts.append(text)
+        return self.stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
+def reuse_key(ctx: Context, project: Project) -> str | None:
+    """Same ftorture code, same student files (not what make fclean removes),
+    same options, tools and terminal: the run gives the same output (the seed
+    is fixed). None when results must not be reused (-e times the code)."""
+    import hashlib
+    import json
+    options = ctx.options
+    # custom suites run your own commands, which may depend on anything
+    if options.efficiency or options.repro or not options.reuse or project.custom:
+        return None
+    from .subject.common import project_files
+    digest = hashlib.sha256()
+
+    def add_file(path: Path) -> None:
+        try:
+            digest.update(str(path).encode() + b"\0" + path.read_bytes() + b"\0")
+        except OSError:
+            digest.update(str(path).encode() + b"\0?\0")
+    for folder in ("src", "ftorture", "data", "protos"):
+        for path in sorted((ctx.root / folder).rglob("*")):
+            if path.is_file() and "__pycache__" not in path.parts:
+                add_file(path)
+    built = {getattr(project, "archive", ""), "push_swap", "checker"}
+    for path in project_files(options.directory, ignore_hidden=options.ignore_hidden):
+        if path.is_file() and path.suffix not in (".o", ".a") and path.name not in built:
+            add_file(path)
+    for value in options.files:
+        candidate = Path(value).expanduser()
+        if candidate.is_file():
+            add_file(candidate)
+    tools = {"python": sys.version}
+    try:
+        compiler = ctx.cc[:1]
+    except RunnerError:
+        compiler = []
+    for tool in (*compiler, "valgrind", "norminette", "make"):
+        where = shutil.which(tool)
+        tools[tool] = [where, Path(where).stat().st_mtime if where else None]
+    checker = Path.home() / "Downloads/checker_linux"
+    terminal = shutil.get_terminal_size()
+    digest.update(json.dumps([repr(options), tools, checker.stat().st_mtime if checker.is_file() else None,
+                              sys.stdout.isatty(), terminal.columns, os.environ.get("NO_COLOR"),
+                              os.environ.get("CC"), os.environ.get("TERM")], default=str).encode())
+    return digest.hexdigest()
+
+
 def execute(ctx: Context, project: Project) -> int:
+    key = reuse_key(ctx, project)
+    saved = ctx.root / "build" / "results" / f"{project.key}.json"
+    if key:
+        import json
+        try:
+            previous = json.loads(saved.read_text())
+        except (OSError, ValueError):
+            previous = None
+        if previous and previous.get("key") == key:
+            sys.stdout.write(previous["output"])
+            if previous.get("log") is not None:
+                (ctx.root / "ftorture.log").write_text(previous["log"])
+            print("   ▶ " + ctx.message("nothing changed since the last run: its results are shown again "
+                                       "(--no-cache to run everything)",
+                                       "rien n'a changé depuis le dernier run : ses résultats sont réaffichés "
+                                       "(--no-cache pour tout relancer)"), flush=True)
+            return int(previous["status"])
+        tee = _Tee(sys.stdout)
+        sys.stdout = tee
+        try:
+            status = _execute(ctx, project)
+        finally:
+            sys.stdout = tee.stream
+        if status in (0, 1):
+            log = ctx.root / "ftorture.log"
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            saved.write_text(json.dumps({"key": key, "status": status, "output": "".join(tee.parts),
+                                         "log": log.read_text(errors="replace") if log.is_file() else None}))
+        return status
+    return _execute(ctx, project)
+
+
+def _execute(ctx: Context, project: Project) -> int:
     if platform.system() != "Linux":
         raise RunnerError(ctx.message("This runner requires Linux.", "Ce lanceur exige Linux."))
     project.validate(ctx)
@@ -203,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
                           checker=args.checker,
                           sanitize=not args.no_sanitize,
                           valgrind=not args.no_valgrind,
+                          reuse=not args.no_cache,
                           repro=args.repro, gdb=args.gdb)
         if args.gdb and not args.repro:
             cli.error("--gdb needs --repro")

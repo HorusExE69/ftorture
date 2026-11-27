@@ -435,6 +435,26 @@ class IntegrationTests(unittest.TestCase):
                     self.assertIn("ft_strlen", out)
                 self.assertFalse((directory / "libft/libft.a").exists())  # final make fclean
 
+    def test_results_are_reused_only_when_nothing_changed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            self.libft_fixture(directory)
+            args = ("libft", directory, "--no-checks", "--no-valgrind", "--no-sanitize", "-f", "strlen",
+                    "--lang", "en", "--no-color")
+            first = self.invoke(*args)
+            again = self.invoke(*args)
+            self.assertEqual(again.returncode, first.returncode, again.stdout + again.stderr)
+            self.assertIn("nothing changed since the last run", again.stdout)
+            self.assertEqual(again.stdout.replace(again.stdout[again.stdout.rindex("   ▶ nothing"):], ""),
+                             first.stdout)
+            for extra in (("--no-cache",), ("-e",)):
+                self.assertNotIn("nothing changed", self.invoke(*args, *extra).stdout)
+            # a different source, even of the same size and date, runs again
+            self.libft_fixture(directory, broken=True)
+            changed = self.invoke(*args)
+            self.assertNotIn("nothing changed", changed.stdout)
+            self.assertEqual(changed.returncode, 1, changed.stdout + changed.stderr)
+
     def test_subject_checks_preserve_failures(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)

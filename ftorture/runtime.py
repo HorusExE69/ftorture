@@ -40,6 +40,7 @@ class Options:
     ignore_hidden: bool = False
     sanitize: bool = True           # -fsanitize=address,undefined pass (--no-sanitize)
     valgrind: bool = True           # memcheck pass on the same tests (--no-valgrind)
+    reuse: bool = True              # show the last results again if nothing changed (--no-cache)
     files: tuple[str, ...] = ()     # gnl --file: paths or sizes (normalized by the project)
     checker: str | None = None      # push_swap --checker: the official checker_linux
     repro: str | None = None        # --repro FILE#IDX[mK][@SUITE[=BS]]: rebuild one test alone

@@ -27,6 +27,7 @@ ERROR = re.compile(r"^==\d+== (Invalid (?:read|write) of size \d+|Invalid free\(
                    r"value\(s\)|Use of uninitialised value of size \d+|Syscall param .* uninitialised byte\(s\)"
                    r"|Source and destination overlap in \S+)", re.M)
 FRAME = re.compile(r"(?:at|by) 0x[0-9A-F]+: (\S+) \((\S+?):(\d+)\)")
+UNINIT = re.compile(r"uninitialised", re.I)
 NULLISH = re.compile(r"Address 0x([0-9a-f]+) is not stack'd, malloc'd or \(recently\) free'd")
 
 
@@ -61,6 +62,7 @@ def collect(directory: Path, root: Path, results: dict | None = None) -> list[Fi
                 tests[parts[0]] = (f"{parts[1]} · {parts[4]}", parts[2] == "1", parts[1],
                                    int(parts[3]) if parts[3].isdigit() else 0)
     findings: dict[tuple[str, str], Finding] = {}
+    rerun = (directory / "uninit-rerun").is_file()
     for log in sorted(directory.glob("vg.*")):
         pid = log.name.split(".", 1)[1]
         owner = directory / f"pid{pid}"
@@ -81,6 +83,8 @@ def collect(directory: Path, root: Path, results: dict | None = None) -> list[Fi
             if null and int(null.group(1), 16) < 4096:
                 continue                     # NULL (+ small offset): the normal tests decide
             kind = match.group(1)
+            if rerun and UNINIT.search(kind):
+                continue                     # reported by the --track-origins rerun
             origin = block.split("Uninitialised value was created", 1)
             used = _own(origin[0], root)
             created = _own(origin[1], root) if len(origin) == 2 else None
@@ -103,20 +107,47 @@ def collect(directory: Path, root: Path, results: dict | None = None) -> list[Fi
 def execute(ctx: Context, executable: Path, args: list[str | Path], name: str,
             skip: str = "") -> list[Path]:
     """memcheck in parallel shards (thread-safe). `skip`: test names left out
-    (heavy tests that add nothing for memcheck)."""
+    (heavy tests that add nothing for memcheck).
+
+    --track-origins doubles memcheck's cost and only says where an
+    uninitialised value came from: the pass runs without it, then reruns with
+    it only the tests that had an uninitialised value, and their reports
+    replace the first ones (the result is the same as one run with it)."""
     from .sanitize import run_sharded
 
-    def command(shard: Path) -> list[str]:
-        return ["valgrind", "--tool=memcheck", "--error-limit=no", "--track-origins=yes",
-                "--leak-check=no", "--fullpath-after=", f"--log-file={shard}/vg.%p",
-                *(str(a) for a in (executable, *ctx.engine_args(), *args)), "--timeout", "120",
-                *(["--skip-name", skip] if skip else [])]
+    def command(origins: bool, seqs: str = ""):
+        def build(shard: Path) -> list[str]:
+            return ["valgrind", "--tool=memcheck", "--error-limit=no",
+                    *(["--track-origins=yes"] if origins else []),
+                    "--leak-check=no", "--fullpath-after=", f"--log-file={shard}/vg.%p",
+                    *(str(a) for a in (executable, *ctx.engine_args(), *args)), "--timeout", "120",
+                    *(["--skip-name", skip] if skip else []), *(["--seqs", seqs] if seqs else [])]
+        return build
 
     def env_for(shard: Path) -> dict[str, str]:
         env = dict(ctx.env)
         env["FTORTURE_SAN_DIR"] = str(shard)
         return env
-    return run_sharded(ctx, ctx.build / "valgrind" / name, command, env_for, 3600)
+    first = run_sharded(ctx, ctx.build / "valgrind" / name, command(False), env_for, 3600)
+    seqs = sorted(uninitialised_seqs(first), key=int)
+    if not seqs:
+        return first
+    for shard in first:
+        (shard / "uninit-rerun").touch()     # collect() takes these errors from the rerun
+    again = run_sharded(ctx, ctx.build / "valgrind" / f"{name}-origins", command(True, ",".join(seqs)),
+                        env_for, 3600)
+    return [*first, *again]
+
+
+def uninitialised_seqs(dirs: list[Path]) -> set[str]:
+    """Tests (seq) whose memcheck log reports an uninitialised value."""
+    seqs = set()
+    for shard in dirs:
+        for log in shard.glob("vg.*"):
+            owner = shard / f"pid{log.name.split('.', 1)[1]}"
+            if owner.is_file() and UNINIT.search(log.read_text(errors="replace")):
+                seqs.add(owner.read_text().split()[0])
+    return seqs
 
 
 def gather(ctx: Context, dirs: list[Path]) -> list[Finding]:

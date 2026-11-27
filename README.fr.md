@@ -111,6 +111,7 @@ torture py01 ~/python-module-01 -c   # python-module-01 (Code Cultivation), mode
 | `-c`, `--chill` | passe les vérifications style/hygiène KO (norminette, flake8/mypy, fichiers en trop, README, includes, hygiène Makefile) en avertissements (▲) |
 | `--no-checks` | saute Makefile / norme / nm / prototypes / vérifs AST Python |
 | `--no-norm` | saute norminette (C) ou flake8 / mypy (Python) |
+| `--no-cache` | tout relancer même si rien n'a changé depuis le dernier run |
 | `--no-valgrind` | saute la passe valgrind (memcheck) |
 | `--no-sanitize` | saute la passe `-fsanitize=address,undefined` |
 | `--no-hidden` | ignore les fichiers/dossiers cachés dans les vérifications des fichiers, includes et norminette |
@@ -457,7 +458,7 @@ le temps parfait et le vrai temps de chaque fonction et tous les coûts de la ma
 ## Vitesse
 
 Sur une machine à 20 cœurs, un run complet (vérifications, tests, valgrind, sanitizers) :
-libft **~6 s** (92 s avant), ft_printf **~4 s** (24 s), get_next_line **~10 s** (126 s), push_swap **~5 s** (11 s),
+libft **~6 s** (92 s avant), ft_printf **~4 s** (24 s), get_next_line **~9 s** (126 s), push_swap **~5 s** (11 s),
 sans aucun test en moins :
 
 - les enfants de test qui plantent exprès (tests `NULL`, crashs comparés à la libc) ne
@@ -472,6 +473,15 @@ sans aucun test en moins :
   passes `BUFFER_SIZE` de get_next_line sont compilées et lancées en même temps, puis
   affichées dans l'ordre habituel (avec `-e`, les passes normales restent l'une après
   l'autre pour que les mesures de temps restent justes) ;
+- valgrind tourne sans `--track-origins` (qui double son coût) et ne relance avec que les
+  tests qui ont une valeur non initialisée : le rapport est le même ;
+- les passes sanitizers de get_next_line sautent le test chronométré « ligne de 100 000
+  en moins de 3 s » (il attend 3 s sur une stash quadratique ; ce code est déjà vu par les
+  lignes de 4096 et 10 000), la passe normale le garde ;
+- **si rien n'a changé** depuis le dernier run (tes fichiers, ftorture, les options, les
+  outils, le terminal), ses résultats sont réaffichés tout de suite, avec une ligne qui le
+  dit ; `--no-cache` relance tout, et ce n'est jamais fait avec `-e` ni pour les tests
+  personnalisés ;
 - les prototypes sont vérifiés en une seule compilation (une par prototype seulement si
   elle échoue) ;
 - les compilations sont gardées dans `build/cache` et réutilisées tant que la source, ses

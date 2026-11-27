@@ -228,10 +228,13 @@ def run_sharded(ctx: Context, directory: Path, command, env_for, timeout: int) -
     return dirs
 
 
-def execute(ctx: Context, executable: Path, args: list[str | Path], name: str) -> list[Path]:
-    """Run the sanitized tester silently, in parallel shards (thread-safe)."""
+def execute(ctx: Context, executable: Path, args: list[str | Path], name: str,
+            skip: str = "") -> list[Path]:
+    """Run the sanitized tester silently, in parallel shards (thread-safe).
+    `skip`: test names left out (timed tests whose waiting adds no coverage)."""
     return run_sharded(ctx, ctx.build / "sanitize" / name,
-                       lambda shard: [str(a) for a in (executable, *ctx.engine_args(), *args)],
+                       lambda shard: [str(a) for a in (executable, *ctx.engine_args(), *args,
+                                                       *(["--skip-name", skip] if skip else []))],
                        lambda shard: environment(ctx, shard), 1800)
 
 

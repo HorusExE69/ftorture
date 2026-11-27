@@ -58,7 +58,8 @@ static struct s_opt
 	int			shard;			/* --shard K/N: only the tests i % N == K      */
 	int			shards;
 	int			split;			/* --split N: FUZZ tests run in N slices       */
-}	o = {0, 0, NULL, ".", 42, 3, 0, 0, 0, 50, NULL, NULL, 0, 1, 1};
+	const char	*seqs;			/* --seqs A,B: only these tests (by seq)       */
+}	o = {0, 0, NULL, ".", 42, 3, 0, 0, 0, 50, NULL, NULL, 0, 1, 1, NULL};
 
 #define L(fr, en) (o.english ? (en) : (fr))
 
@@ -397,6 +398,19 @@ typedef struct s_run
    the test). Verdicts of this pass are not used, only the reports.      */
 void	__sanitizer_set_report_path(const char *path) __attribute__((weak));
 static const char	*g_san_dir;
+
+/* --seqs: the test numbers of tests.tsv, comma-separated (valgrind reruns) */
+static int	seq_in(int seq, const char *list)
+{
+	while (*list)
+	{
+		if (atoi(list) == seq)
+			return (1);
+		list += strcspn(list, ",");
+		list += *list == ',';
+	}
+	return (0);
+}
 
 /* the raw (untranslated) name contains one of the comma-separated items */
 static int	name_has(const char *name, const char *list)
@@ -1313,6 +1327,8 @@ int	main(int ac, char **av)
 			o.names = av[++i];
 		else if (!strcmp(a, "--skip-name") && i + 1 < ac)
 			o.skip_names = av[++i];
+		else if (!strcmp(a, "--seqs") && i + 1 < ac)
+			o.seqs = av[++i];
 		else if (!strcmp(a, "--split") && i + 1 < ac)
 			o.split = atoi(av[++i]) > 1 ? atoi(av[i]) : 1;
 		else if (!strcmp(a, "--shard") && i + 1 < ac)
@@ -1387,12 +1403,13 @@ int	main(int ac, char **av)
 			g_cap = k;
 		}
 	}
-	if (o.skip_names || o.shards > 1)
+	if (o.skip_names || o.shards > 1 || o.seqs)
 	{
 		int	k = 0;
 
 		for (i = 0; i < g_ntests; i++)
 			if (!(o.skip_names && name_has(g_tests[i].name, o.skip_names))
+				&& (!o.seqs || seq_in(g_tests[i].seq, o.seqs))
 				&& (o.shards < 2 || i % o.shards == o.shard))
 				g_tests[k++] = g_tests[i];
 		g_ntests = k;

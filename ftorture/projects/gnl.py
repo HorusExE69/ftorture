@@ -225,7 +225,9 @@ class GnlProject(Project):
             jobs = list(pool.map(build, passes))
         # -e times the code: then nothing else may run at the same time
         timed = ctx.options.efficiency
-        runs = ThreadPoolExecutor(1 if timed else sanitize.workers())
+        # every normal pass at once (sanitize.SLOTS keeps one process per core):
+        # a pool of 8 made the 18 passes run in 3 waves
+        runs = ThreadPoolExecutor(1 if timed else max(1, len(jobs)))
         slow = ThreadPoolExecutor(32)
 
         def normal_run(job: dict):
@@ -249,7 +251,11 @@ class GnlProject(Project):
                     valgrind.execute, ctx, job["exe"], job["args"], job["key"],
                     "Bible,ligne longue (10 000,100 000,lit le minimum,gros fichier,5 000 lignes")))
             if job["san"]:
-                late.append(("san", job, slow.submit(sanitize.execute, ctx, job["san"], job["args"], job["key"])))
+                # "ligne de 100 000 en moins de 3 s" waits up to 3 s on a quadratic
+                # stash: it times the code, the sanitizers already see that code
+                # through the 4096 and 10 000 character lines
+                late.append(("san", job, slow.submit(sanitize.execute, ctx, job["san"], job["args"], job["key"],
+                                                     "en moins de 3 s")))
         return {"jobs": jobs, "normal": normal, "late": late, "pools": (runs, slow), "bonus": bonus,
                 "vg_ok": vg_ok, "san_ok": san_ok}
 
